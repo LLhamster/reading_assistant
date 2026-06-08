@@ -1,0 +1,2184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>信息阅读器</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #faf9f7;
+      --bg-secondary: #ffffff;
+      --bg-tertiary: #f5f3f0;
+      --text-primary: #1a1a1a;
+      --text-secondary: #6b6b6b;
+      --text-muted: #999999;
+      --accent: #c45d3a;
+      --accent-light: #f8ebe7;
+      --border: #e8e6e3;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+      --shadow-md: 0 4px 12px rgba(0,0,0,0.06);
+      --shadow-lg: 0 12px 32px rgba(0,0,0,0.08);
+      --nav-height: 64px;
+      --content-max: 1680px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'DM Sans', -apple-system, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    h1, h2, h3, h4 {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-weight: 600;
+    }
+
+    /* ========== 底部导航 ========== */
+    .nav {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: var(--nav-height);
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      padding: 0 16px;
+      z-index: 100;
+    }
+
+    .nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      padding: 8px 24px;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.25s ease;
+      color: var(--text-muted);
+      min-width: 80px;
+    }
+
+    .nav-item:hover {
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+    }
+
+    .nav-item.active {
+      color: var(--accent);
+      background: var(--accent-light);
+    }
+
+    .nav-item .nav-icon {
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .nav-item .nav-label {
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+    }
+
+    /* ========== 页面容器 ========== */
+    .page {
+      display: none;
+      padding: 28px 32px calc(var(--nav-height) + 28px);
+      max-width: var(--content-max);
+      margin: 0 auto;
+      animation: fadeIn 0.3s ease;
+    }
+
+    .page.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ========== 页面标题区 ========== */
+    .page-header {
+      margin-bottom: 28px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .page-header h1 {
+      font-size: 32px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: var(--text-primary);
+    }
+
+    .page-header p {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-top: 4px;
+    }
+
+    /* ========== 搜索栏 ========== */
+    .search-bar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 24px;
+      flex-wrap: wrap;
+    }
+
+    .search-bar input {
+      flex: 1;
+      min-width: 200px;
+      padding: 12px 16px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 14px;
+      font-family: inherit;
+      background: var(--bg-secondary);
+      transition: all 0.2s ease;
+    }
+
+    .search-bar input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-light);
+    }
+
+    .search-bar select {
+      padding: 12px 16px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 14px;
+      font-family: inherit;
+      background: var(--bg-secondary);
+      cursor: pointer;
+    }
+
+    .btn {
+      padding: 12px 20px;
+      border: none;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 500;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #a84d2f;
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+    }
+
+    .btn-secondary:hover {
+      background: #ebe9e6;
+    }
+
+    /* ========== 新闻网格 ========== */
+    .news-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+
+    .news-card {
+      background: var(--bg-secondary);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: var(--shadow-sm);
+      transition: all 0.3s ease;
+      cursor: pointer;
+      border: 1px solid var(--border);
+    }
+
+    .news-card:hover {
+      transform: translateY(-4px);
+      box-shadow: var(--shadow-lg);
+    }
+
+    .news-card.featured {
+      grid-column: span 2;
+      grid-row: span 1;
+    }
+
+    .news-img {
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: linear-gradient(135deg, #e8d5c4 0%, #c45d3a22 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .news-card.featured .news-img {
+      aspect-ratio: 2/1;
+    }
+
+    .news-img-icon {
+      font-size: 40px;
+      opacity: 0.6;
+    }
+
+    .news-card.featured .news-img-icon {
+      font-size: 56px;
+    }
+
+    .news-body {
+      padding: 20px;
+    }
+
+    .news-category {
+      display: inline-block;
+      padding: 4px 10px;
+      background: var(--accent-light);
+      color: var(--accent);
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 12px;
+    }
+
+    .news-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 18px;
+      font-weight: 600;
+      line-height: 1.4;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+    }
+
+    .news-card.featured .news-title {
+      font-size: 24px;
+    }
+
+    .news-title-en {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-style: italic;
+      margin-bottom: 8px;
+    }
+
+    .news-desc {
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .news-card.featured .news-desc {
+      -webkit-line-clamp: 3;
+    }
+
+    .news-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .news-link {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 500;
+    }
+
+    .news-link:hover {
+      text-decoration: underline;
+    }
+
+    /* ========== 搜索高亮（ES <em> 标签）========== */
+    em {
+      color: #c45d3a;
+      font-style: normal;
+      font-weight: 600;
+    }
+
+    /* ========== 招聘网格 ========== */
+    .jobs-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 24px;
+    }
+
+    .job-card {
+      background: var(--bg-secondary);
+      border-radius: 16px;
+      padding: 28px;
+      box-shadow: var(--shadow-sm);
+      border: 1px solid var(--border);
+      transition: all 0.3s ease;
+    }
+
+    .job-card:hover {
+      transform: translateY(-3px);
+      box-shadow: var(--shadow-md);
+    }
+
+    .job-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 16px;
+    }
+
+    .job-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+
+    .job-company {
+      font-size: 14px;
+      color: var(--text-secondary);
+    }
+
+    .job-salary {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+
+    .job-badges {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 20px;
+    }
+
+    .job-badge {
+      padding: 6px 12px;
+      background: var(--bg-tertiary);
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .job-section {
+      margin-bottom: 20px;
+    }
+
+    .job-section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .job-section-title::before {
+      content: '';
+      width: 4px;
+      height: 4px;
+      background: var(--accent);
+      border-radius: 50%;
+    }
+
+    .job-section-content {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.8;
+      padding-left: 12px;
+    }
+
+    .job-section-content ul {
+      list-style: none;
+      padding: 0;
+    }
+
+    .job-section-content li {
+      padding: 4px 0;
+      padding-left: 16px;
+      position: relative;
+    }
+
+    .job-section-content li::before {
+      content: '—';
+      position: absolute;
+      left: 0;
+      color: var(--border);
+    }
+
+    .job-skills {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .skill-tag {
+      padding: 6px 14px;
+      background: var(--accent-light);
+      color: var(--accent);
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .job-welfare {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .welfare-tag {
+      font-size: 11px;
+      color: #2d8a4e;
+      background: #e8f5ec;
+      padding: 4px 10px;
+      border-radius: 6px;
+    }
+
+    /* ========== 加载/空状态 ========== */
+    .loading, .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    .empty-state::before {
+      content: '📭';
+      display: block;
+      font-size: 48px;
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
+
+    /* ========== 书籍页面 ========== */
+    .books-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    .books-header h1 {
+      font-size: 28px;
+    }
+
+    .books-layout {
+      display: grid;
+      grid-template-columns: 260px minmax(620px, 1fr) 360px;
+      gap: 24px;
+      align-items: start;
+    }
+
+    .books-sidebar {
+      background: var(--bg-secondary);
+      border-radius: 16px;
+      padding: 20px;
+      border: 1px solid var(--border);
+    }
+
+    .books-sidebar h3 {
+      font-size: 14px;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .books-sidebar input {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      margin-bottom: 16px;
+    }
+
+    .books-list {
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+    }
+
+    .books-item {
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: all 0.2s;
+      border-radius: 6px;
+    }
+
+    .books-item-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .books-item-main {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .books-item:hover {
+      background: var(--bg-tertiary);
+    }
+
+    .books-item-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--text-primary);
+      margin-bottom: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .books-item-author {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .rag-toggle {
+      width: 26px;
+      height: 26px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg-tertiary);
+      color: var(--text-muted);
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+
+    .rag-toggle.ready {
+      color: #1f7a4d;
+      border-color: rgba(31, 122, 77, 0.3);
+      background: rgba(31, 122, 77, 0.08);
+    }
+
+    .rag-toggle.indexing {
+      color: var(--accent);
+      cursor: wait;
+      animation: pulse 1s ease-in-out infinite;
+    }
+
+    .rag-toggle.failed {
+      color: #b42318;
+      border-color: rgba(180, 35, 24, 0.3);
+      background: rgba(180, 35, 24, 0.08);
+    }
+
+    .reader-area {
+      background: var(--bg-secondary);
+      border-radius: 16px;
+      padding: 40px 48px;
+      border: 1px solid var(--border);
+      min-height: calc(100vh - var(--nav-height) - 112px);
+    }
+
+    .reader-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 26px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .reader-subtitle {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .reader-nav {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+
+    .reader-nav select {
+      flex: 1 1 auto;
+      min-width: 220px;
+      height: 34px;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 13px;
+    }
+
+    .reader-nav button {
+      flex: 0 0 auto;
+      height: 34px;
+      min-width: 64px;
+      white-space: nowrap;
+      padding: 8px 16px;
+      background: var(--bg-tertiary);
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      line-height: 1;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .reader-nav button:hover {
+      background: var(--border);
+    }
+
+    .reader-style-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: -6px 0 20px;
+      color: var(--text-muted);
+      font-size: 12px;
+      flex-wrap: wrap;
+    }
+
+    .reader-style-toolbar button,
+    .reader-style-toolbar select {
+      height: 30px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      font-family: inherit;
+      font-size: 12px;
+    }
+
+    .reader-style-toolbar button {
+      min-width: 34px;
+      padding: 0 10px;
+      cursor: pointer;
+    }
+
+    .reader-style-toolbar select {
+      padding: 0 8px;
+      cursor: pointer;
+    }
+
+    .reader-content {
+      font-size: 16px;
+      line-height: 2;
+      color: var(--text-primary);
+      white-space: pre-wrap;
+      font-family: 'Cormorant Garamond', Georgia, serif;
+    }
+
+    /* ========== AI阅读侧栏 ========== */
+    .ai-panel {
+      background: var(--bg-secondary);
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      min-height: calc(100vh - var(--nav-height) - 112px);
+      max-height: calc(100vh - var(--nav-height) - 48px);
+      display: flex;
+      flex-direction: column;
+      position: sticky;
+      top: 24px;
+      overflow: hidden;
+    }
+
+    .ai-panel-header {
+      padding: 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-secondary);
+    }
+
+    .ai-title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    .ai-title {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .ai-note-btn {
+      border: 1px solid var(--border);
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+      cursor: not-allowed;
+    }
+
+    .ai-subtitle {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    .ai-session {
+      margin-top: 10px;
+      font-size: 11px;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .ai-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-primary) 100%);
+    }
+
+    .ai-message {
+      max-width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .ai-message.user {
+      align-items: flex-end;
+    }
+
+    .ai-bubble {
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 13px;
+      line-height: 1.7;
+      overflow-wrap: anywhere;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .ai-message.user .ai-bubble,
+    .ai-message.error .ai-bubble {
+      white-space: pre-wrap;
+    }
+
+    .ai-message.assistant .ai-bubble {
+      white-space: normal;
+    }
+
+    .ai-bubble p {
+      margin: 0 0 10px;
+    }
+
+    .ai-bubble p:last-child,
+    .ai-bubble ul:last-child,
+    .ai-bubble ol:last-child {
+      margin-bottom: 0;
+    }
+
+    .ai-bubble strong {
+      font-weight: 700;
+      color: #111;
+    }
+
+    .ai-bubble ul,
+    .ai-bubble ol {
+      margin: 8px 0 10px 18px;
+      padding: 0;
+    }
+
+    .ai-bubble li {
+      margin: 4px 0;
+      padding-left: 2px;
+    }
+
+    .ai-message.user .ai-bubble {
+      background: var(--accent);
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+
+    .ai-message.assistant .ai-bubble {
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      border: 1px solid var(--border);
+      border-bottom-left-radius: 4px;
+    }
+
+    .ai-message.error .ai-bubble {
+      background: #fff3f0;
+      color: #9b3d24;
+      border: 1px solid #f1c4b7;
+    }
+
+    .ai-meta-block {
+      background: rgba(255,255,255,0.72);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    .ai-meta-title {
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 6px;
+    }
+
+    .ai-meta-list {
+      margin: 0;
+      padding-left: 16px;
+    }
+
+    .ai-meta-list li {
+      margin: 4px 0;
+    }
+
+    .ai-interaction {
+      background: rgba(255,255,255,0.82);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .ai-option-btn {
+      width: 100%;
+      border: 1px solid var(--border);
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      border-radius: 8px;
+      padding: 9px 10px;
+      text-align: left;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .ai-option-btn:hover:not(:disabled) {
+      border-color: var(--accent);
+      background: var(--accent-light);
+    }
+
+    .ai-option-btn:disabled {
+      opacity: 0.55;
+      cursor: wait;
+    }
+
+    .ai-option-label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+
+    .ai-option-desc {
+      display: block;
+      margin-top: 2px;
+      font-size: 11px;
+      color: var(--text-secondary);
+      overflow-wrap: anywhere;
+    }
+
+    .ai-custom-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .ai-custom-row input {
+      min-width: 0;
+      flex: 1;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px 10px;
+      font-size: 12px;
+      font-family: inherit;
+      background: var(--bg-secondary);
+    }
+
+    .ai-custom-row button {
+      border: none;
+      border-radius: 8px;
+      padding: 0 12px;
+      font-size: 12px;
+      font-weight: 600;
+      font-family: inherit;
+      color: white;
+      background: var(--accent);
+      cursor: pointer;
+    }
+
+    .ai-custom-row button:disabled,
+    .ai-custom-row input:disabled {
+      opacity: 0.55;
+      cursor: wait;
+    }
+
+    .ai-empty {
+      height: 100%;
+      min-height: 280px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+      padding: 24px;
+    }
+
+    .ai-empty-title {
+      font-family: 'Cormorant Garamond', Georgia, serif;
+      font-size: 22px;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+
+    .ai-loading {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    .ai-loading::before {
+      content: '';
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 1s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.35; transform: scale(0.85); }
+      50% { opacity: 1; transform: scale(1); }
+    }
+
+    .ai-input-area {
+      padding: 16px;
+      border-top: 1px solid var(--border);
+      background: var(--bg-secondary);
+    }
+
+    .ai-input-wrap {
+      display: flex;
+      gap: 10px;
+      align-items: flex-end;
+    }
+
+    .ai-selection-chip {
+      display: none;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--accent-light);
+      color: var(--text-secondary);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .ai-selection-chip.active {
+      display: flex;
+    }
+
+    .ai-selection-text {
+      min-width: 0;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+
+    .ai-selection-clear {
+      border: none;
+      background: transparent;
+      color: var(--accent);
+      font: inherit;
+      font-size: 11px;
+      cursor: pointer;
+      flex: 0 0 auto;
+      padding: 0;
+    }
+
+    .ai-input-wrap textarea {
+      flex: 1;
+      min-height: 46px;
+      max-height: 120px;
+      resize: vertical;
+      padding: 11px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-family: inherit;
+      font-size: 13px;
+      line-height: 1.5;
+      background: var(--bg-secondary);
+    }
+
+    .ai-input-wrap textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-light);
+    }
+
+    .ai-send-btn {
+      width: 46px;
+      height: 46px;
+      border-radius: 10px;
+      border: none;
+      background: var(--accent);
+      color: white;
+      font-size: 18px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      flex: 0 0 auto;
+    }
+
+    .ai-send-btn:hover:not(:disabled) {
+      background: #a84d2f;
+      transform: translateY(-1px);
+    }
+
+    .ai-send-btn:disabled,
+    .ai-input-wrap textarea:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .ai-input-hint {
+      margin-top: 8px;
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    /* ========== 登录弹窗 ========== */
+    .login-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 200;
+    }
+
+    .login-card {
+      background: var(--bg-secondary);
+      padding: 32px;
+      border-radius: 20px;
+      width: 360px;
+      max-width: 90vw;
+    }
+
+    .login-card h2 {
+      font-size: 24px;
+      margin-bottom: 20px;
+    }
+
+    .login-card input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 14px;
+      margin-bottom: 12px;
+    }
+
+    .login-card button {
+      width: 100%;
+      padding: 12px;
+      margin-bottom: 8px;
+    }
+
+    .login-card small {
+      display: block;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 12px;
+      margin-top: 12px;
+    }
+
+    /* ========== 响应式 ========== */
+    @media (max-width: 1024px) {
+      .news-grid { grid-template-columns: repeat(2, 1fr); }
+      .news-card.featured { grid-column: span 2; }
+      .jobs-grid { grid-template-columns: 1fr; }
+      .books-layout { grid-template-columns: 1fr; }
+      .ai-panel {
+        position: static;
+        max-height: none;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .news-grid { grid-template-columns: 1fr; }
+      .news-card.featured { grid-column: span 1; }
+      .page { padding: 20px 16px calc(var(--nav-height) + 16px); }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ========== 书籍页面 ========== -->
+<div id="page-books" class="page active">
+  <div class="books-header">
+    <h1>📖 阅读空间</h1>
+    <div>
+      <span id="userStatus" style="font-size:14px;color:var(--text-secondary);margin-right:12px;">未登录</span>
+      <button class="btn btn-secondary" onclick="openLogin()">登录</button>
+    </div>
+  </div>
+
+  <div class="books-layout">
+    <aside class="books-sidebar">
+      <h3>搜索图书</h3>
+      <input type="text" id="searchInput" placeholder="输入书名或作者..." />
+      <button class="btn btn-primary" style="width:100%;margin-bottom:16px;" onclick="searchBooks()">搜索</button>
+
+      <h3>我的书架</h3>
+      <div id="shelfStatus" style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">登录后查看书架</div>
+      <div id="shelfList" class="books-list"></div>
+    </aside>
+
+    <main class="reader-area">
+      <div class="reader-title" id="readerBookTitle">选择一本书开始阅读</div>
+      <div class="reader-subtitle" id="readerBookSub"></div>
+
+      <div class="reader-nav">
+        <button onclick="prevChapter()">上一章</button>
+        <button onclick="nextChapter()">下一章</button>
+        <select id="chapterSelect" onchange="jumpChapter()"></select>
+        <button onclick="addCurrentBookToShelf()" style="margin-left:auto;">加入书架</button>
+      </div>
+
+      <div class="reader-style-toolbar">
+        <span>阅读样式</span>
+        <button onclick="changeReaderFontSize(-1)" title="缩小字号">A-</button>
+        <button onclick="changeReaderFontSize(1)" title="放大字号">A+</button>
+        <select id="readerFontSelect" onchange="setReaderFont(this.value)" title="字体">
+          <option value="serif">宋体</option>
+          <option value="sans">黑体</option>
+          <option value="kai">楷体</option>
+        </select>
+        <select id="readerLineHeightSelect" onchange="setReaderLineHeight(this.value)" title="行距">
+          <option value="1.7">紧凑</option>
+          <option value="2">舒适</option>
+          <option value="2.3">宽松</option>
+        </select>
+      </div>
+
+      <div class="reader-content" id="chapterContent">
+在这里开始您的阅读之旅...
+      </div>
+    </main>
+
+    <aside class="ai-panel">
+      <div class="ai-panel-header">
+        <div class="ai-title-row">
+          <div class="ai-title">阅读 Agent</div>
+          <button class="ai-note-btn" title="笔记功能后续接入">笔记预留</button>
+        </div>
+        <div class="ai-subtitle">围绕当前章节提问，结合阅读上下文、记忆与书籍片段回答。</div>
+        <div class="ai-session" id="aiSessionLabel">未选择书籍</div>
+      </div>
+
+      <div class="ai-messages" id="aiMessages"></div>
+
+      <div class="ai-input-area">
+        <div class="ai-selection-chip" id="aiSelectionChip">
+          <div class="ai-selection-text" id="aiSelectionText"></div>
+          <button class="ai-selection-clear" id="aiSelectionClear" type="button">清除</button>
+        </div>
+        <div class="ai-input-wrap">
+          <textarea id="aiQuestionInput" placeholder="先选择一本书，然后向我提问..." disabled></textarea>
+          <button id="aiSendBtn" class="ai-send-btn" onclick="sendAiQuestion()" disabled title="发送">↑</button>
+        </div>
+        <div class="ai-input-hint" id="aiInputHint">未登录也可以试用；登录后会启用个人记忆。</div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<!-- ========== 招聘页面 ========== -->
+<div id="page-jobs" class="page">
+  <div class="page-header">
+    <h1>💼 精选职位</h1>
+    <p>为您推荐最新Java开发相关职位</p>
+  </div>
+
+  <div class="search-bar">
+    <input type="text" id="jobSearchInput" placeholder="搜索职位、公司或技能..." />
+    <select id="jobCitySelect">
+      <option value="">全部城市</option>
+      <option value="北京">北京</option>
+      <option value="上海">上海</option>
+      <option value="深圳">深圳</option>
+      <option value="杭州">杭州</option>
+      <option value="广州">广州</option>
+      <option value="成都">成都</option>
+      <option value="南京">南京</option>
+      <option value="武汉">武汉</option>
+    </select>
+    <button class="btn btn-primary" onclick="searchJobs()">搜索</button>
+    <button class="btn btn-secondary" onclick="loadJobs()">刷新</button>
+  </div>
+
+  <div id="jobsList">
+    <div class="empty-state">点击「刷新」按钮加载最新职位</div>
+  </div>
+</div>
+
+<!-- ========== 新闻页面 ========== -->
+<div id="page-news" class="page">
+  <div class="page-header">
+    <h1>📰 资讯速递</h1>
+    <p>精选科技、国际、商业与科学资讯</p>
+  </div>
+
+  <div class="search-bar">
+    <input type="text" id="newsSearchInput" placeholder="搜索关键词..." />
+    <select id="newsCategorySelect">
+      <option value="">全部分类</option>
+      <option value="科技">科技</option>
+      <option value="国际">国际</option>
+      <option value="商业">商业</option>
+      <option value="科学">科学</option>
+    </select>
+    <button class="btn btn-primary" onclick="searchNews()">搜索</button>
+    <button class="btn btn-secondary" onclick="loadNews()">刷新</button>
+  </div>
+
+  <div id="newsList">
+    <div class="empty-state">点击「刷新」按钮加载最新资讯</div>
+  </div>
+</div>
+
+<!-- ========== 底部导航 ========== -->
+<nav class="nav">
+  <div class="nav-item active" onclick="switchTab('books')">
+    <span class="nav-icon">📖</span>
+    <span class="nav-label">阅读</span>
+  </div>
+  <div class="nav-item" onclick="switchTab('jobs')">
+    <span class="nav-icon">💼</span>
+    <span class="nav-label">招聘</span>
+  </div>
+  <div class="nav-item" onclick="switchTab('news')">
+    <span class="nav-icon">📰</span>
+    <span class="nav-label">资讯</span>
+  </div>
+</nav>
+
+<!-- ========== 登录弹窗 ========== -->
+<div id="loginOverlay" class="login-overlay">
+  <div class="login-card">
+    <h2>登录 / 注册</h2>
+    <input type="text" id="loginUsername" placeholder="用户名" value="user1" />
+    <input type="password" id="loginPassword" placeholder="密码" value="123456" />
+    <button class="btn btn-primary" onclick="doLogin()">登录</button>
+    <button class="btn btn-secondary" onclick="doRegister()">注册</button>
+    <button class="btn btn-secondary" onclick="closeLogin()">取消</button>
+    <small id="loginMsg"></small>
+  </div>
+</div>
+
+<script>
+// ========== 全局状态 ==========
+let currentUser = null;
+let currentBookId = null;
+let currentChapterIndex = 1;
+let currentChapterTitle = '';
+let currentChapterContent = '';
+let chaptersCache = [];
+let shelfItems = [];
+let allJobs = [];
+let allNews = [];
+let aiSessionId = null;
+let aiContextId = null;
+let aiMessages = [];
+let aiLoading = false;
+let selectedReadingContext = null;
+const guestUserId = 'guest_' + Date.now();
+const defaultReaderStyle = { fontSize: 16, lineHeight: '2', font: 'serif' };
+let readerStyle = { ...defaultReaderStyle };
+
+// ========== API工具 ==========
+async function api(method, url, body) {
+  const options = { method, headers: {}, credentials: 'include' };
+  if (currentUser && currentUser.token) {
+    options.headers['Authorization'] = 'Bearer ' + currentUser.token;
+  }
+  if (body != null) {
+    options.headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify(body);
+  }
+  const res = await fetch(url, options);
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch (_) { data = text; }
+  if (!res.ok) {
+    const msg = data && data.message ? data.message : 'HTTP ' + res.status;
+    throw new Error(msg);
+  }
+  if (data && typeof data === 'object' && Object.prototype.hasOwnProperty.call(data, 'code') && Object.prototype.hasOwnProperty.call(data, 'data')) {
+    if (data.code !== 0) throw new Error(data.message || '请求失败');
+    return data.data;
+  }
+  return data;
+}
+
+// ========== 登录 ==========
+function openLogin() { document.getElementById('loginOverlay').style.display = 'flex'; }
+function closeLogin() { document.getElementById('loginOverlay').style.display = 'none'; }
+
+async function doLogin() {
+  const username = document.getElementById('loginUsername').value;
+  const password = document.getElementById('loginPassword').value;
+  try {
+    const auth = await api('POST', '/api/auth/login', { username, password });
+    currentUser = {
+      id: auth && auth.id != null ? auth.id : null,
+      username: auth && auth.username ? auth.username : username,
+      token: auth && auth.token ? auth.token : null
+    };
+    localStorage.setItem('readerCurrentUser', JSON.stringify(currentUser));
+    updateUserStatus();
+    updateAiPanelState();
+    loadBookshelf();
+    closeLogin();
+  } catch (e) {
+    document.getElementById('loginMsg').textContent = '登录失败';
+  }
+}
+
+async function doRegister() {
+  const username = document.getElementById('loginUsername').value;
+  const password = document.getElementById('loginPassword').value;
+  try {
+    await api('POST', '/api/auth/register', { username, password });
+    document.getElementById('loginMsg').textContent = '注册成功，请登录';
+  } catch (e) {
+    document.getElementById('loginMsg').textContent = '注册失败';
+  }
+}
+
+function updateUserStatus() {
+  document.getElementById('userStatus').textContent = hasAuthUser() ? '已登录：' + currentUser.username : '未登录';
+  document.getElementById('shelfStatus').textContent = hasAuthUser() ? '正在加载书架...' : '登录后查看书架';
+}
+
+function restoreUser() {
+  try {
+    const raw = localStorage.getItem('readerCurrentUser');
+    if (raw) currentUser = JSON.parse(raw);
+  } catch (_) {
+    currentUser = null;
+  }
+}
+
+function hasAuthUser() {
+  return !!(currentUser && currentUser.token);
+}
+
+// ========== 阅读样式 ==========
+function restoreReaderStyle() {
+  try {
+    const raw = localStorage.getItem('readerTextStyle');
+    if (raw) readerStyle = { ...defaultReaderStyle, ...JSON.parse(raw) };
+  } catch (_) {
+    readerStyle = { ...defaultReaderStyle };
+  }
+  applyReaderStyle();
+}
+
+function saveReaderStyle() {
+  localStorage.setItem('readerTextStyle', JSON.stringify(readerStyle));
+}
+
+function applyReaderStyle() {
+  const content = document.getElementById('chapterContent');
+  if (!content) return;
+  content.style.fontSize = readerStyle.fontSize + 'px';
+  content.style.lineHeight = readerStyle.lineHeight;
+  content.style.fontFamily = readerFontFamily(readerStyle.font);
+
+  const fontSelect = document.getElementById('readerFontSelect');
+  if (fontSelect) fontSelect.value = readerStyle.font;
+  const lineHeightSelect = document.getElementById('readerLineHeightSelect');
+  if (lineHeightSelect) lineHeightSelect.value = readerStyle.lineHeight;
+}
+
+function readerFontFamily(font) {
+  if (font === 'sans') return "'DM Sans', 'Microsoft YaHei', 'PingFang SC', sans-serif";
+  if (font === 'kai') return "'KaiTi', 'STKaiti', 'Kaiti SC', serif";
+  return "'Noto Serif SC', 'Songti SC', 'SimSun', 'Cormorant Garamond', Georgia, serif";
+}
+
+function changeReaderFontSize(delta) {
+  readerStyle.fontSize = Math.max(14, Math.min(24, (readerStyle.fontSize || 16) + delta));
+  saveReaderStyle();
+  applyReaderStyle();
+}
+
+function setReaderFont(font) {
+  readerStyle.font = font || defaultReaderStyle.font;
+  saveReaderStyle();
+  applyReaderStyle();
+}
+
+function setReaderLineHeight(lineHeight) {
+  readerStyle.lineHeight = lineHeight || defaultReaderStyle.lineHeight;
+  saveReaderStyle();
+  applyReaderStyle();
+}
+
+function captureReadingSelection() {
+  const contentEl = document.getElementById('chapterContent');
+  const selection = window.getSelection();
+  if (!contentEl || !selection || selection.rangeCount === 0) return;
+  const selectedText = selection.toString().trim();
+  if (!selectedText) return;
+  const range = selection.getRangeAt(0);
+  if (!contentEl.contains(range.commonAncestorContainer)) return;
+  selectedReadingContext = {
+    selectedText: trimText(selectedText, 500),
+    selectedContext: buildSelectedReadingContext(selectedText)
+  };
+  renderSelectedReadingContext();
+}
+
+function buildSelectedReadingContext(selectedText) {
+  const source = currentChapterContent || document.getElementById('chapterContent').textContent || '';
+  const normalizedSelection = selectedText.replace(/\s+/g, ' ').trim();
+  const normalizedSource = source.replace(/\s+/g, ' ').trim();
+  const index = normalizedSource.indexOf(normalizedSelection);
+  if (index < 0) {
+    return trimText(normalizedSelection, 1200);
+  }
+  const start = findSentenceWindowStart(normalizedSource, index, 1);
+  const end = findSentenceWindowEnd(normalizedSource, index + normalizedSelection.length, 2);
+  return trimText(normalizedSource.slice(start, end).trim(), 1400);
+}
+
+function findSentenceWindowStart(text, index, previousSentenceCount) {
+  let pos = sentenceStartBefore(text, index);
+  for (let i = 0; i < previousSentenceCount; i++) {
+    const previous = sentenceStartBefore(text, pos - 2);
+    if (previous < 0) return 0;
+    pos = previous;
+  }
+  return pos;
+}
+
+function findSentenceWindowEnd(text, index, sentenceCount) {
+  let pos = Math.min(text.length, index);
+  for (let i = 0; i < sentenceCount; i++) {
+    const next = nextSentenceBoundary(text, pos);
+    if (next < 0) return text.length;
+    pos = next;
+  }
+  return pos;
+}
+
+function sentenceStartBefore(text, index) {
+  const previous = lastSentenceBoundary(text, index - 1);
+  return previous < 0 ? 0 : previous;
+}
+
+function lastSentenceBoundary(text, from) {
+  const boundaries = '。！？.!?';
+  for (let i = Math.min(from, text.length - 1); i >= 0; i--) {
+    if (boundaries.includes(text[i])) return i + 1;
+  }
+  return -1;
+}
+
+function nextSentenceBoundary(text, from) {
+  const boundaries = '。！？.!?';
+  for (let i = Math.max(0, from); i < text.length; i++) {
+    if (boundaries.includes(text[i])) return i + 1;
+  }
+  return -1;
+}
+
+function trimText(text, maxLength) {
+  const normalized = (text || '').replace(/\s+/g, ' ').trim();
+  return normalized.length <= maxLength ? normalized : normalized.slice(0, maxLength) + '...';
+}
+
+function selectedReadingPayload() {
+  return selectedReadingContext || {};
+}
+
+function renderSelectedReadingContext() {
+  const chip = document.getElementById('aiSelectionChip');
+  const text = document.getElementById('aiSelectionText');
+  if (!chip || !text) return;
+  if (!selectedReadingContext || !selectedReadingContext.selectedText) {
+    chip.classList.remove('active');
+    text.textContent = '';
+    return;
+  }
+  chip.classList.add('active');
+  text.textContent = '已选：' + selectedReadingContext.selectedText;
+}
+
+function clearSelectedReadingContext() {
+  selectedReadingContext = null;
+  const selection = window.getSelection();
+  if (selection) selection.removeAllRanges();
+  renderSelectedReadingContext();
+}
+
+// ========== 页面切换 ==========
+function switchTab(tab) {
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  document.querySelector('.nav-item:nth-child(' + ({books:1, jobs:2, news:3}[tab] || 1) + ')').classList.add('active');
+  document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+  document.getElementById('page-' + tab).classList.add('active');
+}
+
+// ========== 图书功能 ==========
+async function searchBooks() {
+  const keyword = document.getElementById('searchInput').value.trim();
+  if (!keyword) return;
+  try {
+    // 使用 ES 搜索接口，支持高亮
+    const results = await api('GET', '/api/search?keyword=' + encodeURIComponent(keyword));
+    const listEl = document.getElementById('shelfList');
+    document.getElementById('shelfStatus').textContent = '搜索结果';
+    listEl.innerHTML = '';
+    // results 直接是数组（List）
+    (results || []).forEach(result => {
+      const div = document.createElement('div');
+      div.className = 'books-item';
+      div.onclick = () => openBook(result.id);
+      // 标题和作者支持 ES 高亮标签
+      const titleHtml = result.titleHighlight || esc(result.title);
+      const authorHtml = result.authorHighlight || esc(result.author || '未知');
+      div.innerHTML = '<div class="books-item-title">' + titleHtml + '</div>' +
+        '<div class="books-item-author">' + authorHtml + '</div>';
+      listEl.appendChild(div);
+    });
+  } catch (e) { console.error(e); }
+}
+
+async function loadBookshelf() {
+  const listEl = document.getElementById('shelfList');
+  if (!hasAuthUser()) {
+    shelfItems = [];
+    listEl.innerHTML = '';
+    document.getElementById('shelfStatus').textContent = '登录后查看书架';
+    return;
+  }
+  try {
+    shelfItems = await api('GET', '/api/user/bookshelf') || [];
+    renderBookshelf();
+  } catch (e) {
+    console.error(e);
+    document.getElementById('shelfStatus').textContent = '书架加载失败';
+  }
+}
+
+function renderBookshelf() {
+  const listEl = document.getElementById('shelfList');
+  listEl.innerHTML = '';
+  document.getElementById('shelfStatus').textContent = shelfItems.length ? '已加入 ' + shelfItems.length + ' 本' : '书架为空';
+  shelfItems.forEach(item => {
+    const book = item.book || item;
+    const div = document.createElement('div');
+    div.className = 'books-item';
+    div.onclick = () => openBook(book.id);
+
+    const row = document.createElement('div');
+    row.className = 'books-item-row';
+    const main = document.createElement('div');
+    main.className = 'books-item-main';
+    main.innerHTML = '<div class="books-item-title">' + esc(book.title || '') + '</div>' +
+      '<div class="books-item-author">' + esc(book.author || '未知') + '</div>';
+    row.appendChild(main);
+
+    const ragButton = document.createElement('button');
+    const status = item.ragStatus || 'NONE';
+    ragButton.className = 'rag-toggle ' + status.toLowerCase();
+    ragButton.textContent = ragStatusText(status);
+    ragButton.title = ragStatusTitle(status, item.ragError);
+    ragButton.disabled = status === 'INDEXING' || status === 'READY';
+    ragButton.onclick = (event) => {
+      event.stopPropagation();
+      startShelfRag(book.id);
+    };
+    row.appendChild(ragButton);
+    div.appendChild(row);
+    listEl.appendChild(div);
+  });
+}
+
+function ragStatusText(status) {
+  if (status === 'READY') return '✓';
+  if (status === 'INDEXING') return '…';
+  if (status === 'FAILED') return '!';
+  return 'R';
+}
+
+function ragStatusTitle(status, error) {
+  if (status === 'READY') return 'RAG 已完成';
+  if (status === 'INDEXING') return 'RAG 构建中';
+  if (status === 'FAILED') return 'RAG 构建失败：' + (error || '可重试');
+  return '构建 RAG';
+}
+
+async function startShelfRag(bookId) {
+  if (!hasAuthUser()) { openLogin(); return; }
+  try {
+    await api('POST', '/api/user/bookshelf/' + bookId + '/rag');
+    await loadBookshelf();
+  } catch (e) {
+    alert(e.message || 'RAG 构建启动失败');
+  }
+}
+
+async function openBook(bookId) {
+  currentBookId = bookId;
+  currentChapterIndex = 1;
+  try {
+    const book = await api('GET', '/api/books/' + bookId);
+    document.getElementById('readerBookTitle').textContent = book.title;
+    document.getElementById('readerBookSub').textContent = (book.author || '') + ' · ' + (book.status || '');
+    chaptersCache = await api('GET', '/api/books/' + bookId + '/chapters');
+    const select = document.getElementById('chapterSelect');
+    renderChapterOptions(select, chaptersCache);
+    await loadCurrentChapter();
+  } catch (e) { console.error(e); }
+}
+
+function renderChapterOptions(select, chapters) {
+  select.innerHTML = '';
+  const hasVolume = (chapters || []).some(ch => ch.volumeTitle);
+  if (!hasVolume) {
+    (chapters || []).forEach(ch => select.appendChild(chapterOption(ch)));
+    return;
+  }
+
+  let currentGroup = null;
+  let currentVolumeKey = null;
+  (chapters || []).forEach(ch => {
+    const volumeKey = ch.volumeTitle || '';
+    if (volumeKey !== currentVolumeKey) {
+      currentVolumeKey = volumeKey;
+      currentGroup = document.createElement('optgroup');
+      currentGroup.label = volumeKey || '未分卷';
+      select.appendChild(currentGroup);
+    }
+    currentGroup.appendChild(chapterOption(ch));
+  });
+}
+
+function chapterOption(ch) {
+  const opt = document.createElement('option');
+  opt.value = ch.chapterIndex;
+  opt.textContent = ch.chapterIndex + '. ' + ch.title;
+  return opt;
+}
+
+async function loadCurrentChapter() {
+  if (!currentBookId) return;
+  try {
+    const chapter = await api('GET', '/api/books/' + currentBookId + '/chapters/' + currentChapterIndex);
+    currentChapterTitle = chapter.title || '';
+    currentChapterContent = chapter.content || '';
+    document.getElementById('chapterContent').textContent = chapter.title + '\n\n' + chapter.content;
+    selectedReadingContext = null;
+    renderSelectedReadingContext();
+    document.getElementById('chapterSelect').value = currentChapterIndex;
+    prepareAiForCurrentChapter(chapter);
+  } catch (e) { console.error(e); }
+}
+
+function prevChapter() { if (currentBookId && currentChapterIndex > 1) { currentChapterIndex--; loadCurrentChapter(); } }
+function nextChapter() {
+  if (!currentBookId) return;
+  const max = Math.max(...chaptersCache.map(c => c.chapterIndex));
+  if (currentChapterIndex < max) { currentChapterIndex++; loadCurrentChapter(); }
+}
+function jumpChapter() {
+  const v = parseInt(document.getElementById('chapterSelect').value, 10);
+  if (!isNaN(v)) { currentChapterIndex = v; loadCurrentChapter(); }
+}
+
+async function addCurrentBookToShelf() {
+  if (!currentBookId) return;
+  if (!hasAuthUser()) { openLogin(); return; }
+  try {
+    await api('POST', '/api/user/bookshelf/' + currentBookId);
+    await loadBookshelf();
+    alert('已加入书架');
+  } catch (e) { alert('加入失败'); }
+}
+
+// ========== AI阅读Agent ==========
+function prepareAiForCurrentChapter(chapter) {
+  const nextSessionId = currentBookId ? 'book_' + currentBookId + '_chapter_' + currentChapterIndex : null;
+  if (nextSessionId !== aiSessionId) {
+    aiSessionId = nextSessionId;
+    aiContextId = null;
+    aiMessages = [];
+    if (currentBookId) {
+      aiMessages.push({
+        role: 'assistant',
+        content: '可以向我提问当前章节内容。我会优先结合本章片段、阅读上下文和你的个人记忆来回答。'
+      });
+    }
+  }
+  updateAiPanelState(chapter && chapter.title ? chapter.title : '');
+  renderAiMessages();
+}
+
+function updateAiPanelState(chapterTitle) {
+  const visibleChapterTitle = chapterTitle || currentChapterTitle;
+  const input = document.getElementById('aiQuestionInput');
+  const sendBtn = document.getElementById('aiSendBtn');
+  const label = document.getElementById('aiSessionLabel');
+  const hint = document.getElementById('aiInputHint');
+  if (!input || !sendBtn || !label || !hint) return;
+
+  const hasBook = !!currentBookId;
+  input.disabled = !hasBook || aiLoading;
+  sendBtn.disabled = !hasBook || aiLoading;
+  input.placeholder = hasBook ? '围绕当前章节提问...' : '先选择一本书，然后向我提问...';
+  label.textContent = hasBook
+    ? '当前：书籍 ' + currentBookId + ' · 第 ' + currentChapterIndex + ' 章' + (visibleChapterTitle ? ' · ' + visibleChapterTitle : '')
+    : '未选择书籍';
+  hint.textContent = hasAuthUser()
+    ? '已登录，将使用个人记忆增强回答。'
+    : '未登录也可以试用；登录后会启用个人记忆。';
+}
+
+function renderAiMessages() {
+  const box = document.getElementById('aiMessages');
+  if (!box) return;
+
+  if (!currentBookId) {
+    box.innerHTML = '<div class="ai-empty"><div class="ai-empty-title">选择一本书开始</div><div>打开章节后，可以在这里向阅读 Agent 提问。</div></div>';
+    updateAiPanelState();
+    return;
+  }
+
+  let html = '';
+  aiMessages.forEach((msg, msgIndex) => {
+    const role = msg.role || 'assistant';
+    html += '<div class="ai-message ' + esc(role) + '">';
+    html += '<div class="ai-bubble">' + renderAiContent(msg.content || '', role) + '</div>';
+    if (msg.sources && msg.sources.length) {
+      html += renderAiMetaBlock('参考来源', msg.sources);
+    }
+    if (msg.memoryRefs && msg.memoryRefs.length) {
+      html += renderAiMetaBlock('相关记忆', msg.memoryRefs);
+    }
+    if (msg.externalMcpPlanRefs && msg.externalMcpPlanRefs.length) {
+      html += renderAiMetaBlock('工具规划', msg.externalMcpPlanRefs);
+    }
+    if (msg.externalMcpRefs && msg.externalMcpRefs.length) {
+      html += renderAiMetaBlock('MCP 工具', msg.externalMcpRefs);
+    }
+    if (msg.interaction) {
+      html += renderAiInteraction(msg.interaction, msgIndex);
+    }
+    html += '</div>';
+  });
+
+  if (aiLoading) {
+    html += '<div class="ai-message assistant"><div class="ai-bubble"><span class="ai-loading">正在结合上下文思考</span></div></div>';
+  }
+
+  box.innerHTML = html;
+  box.scrollTop = box.scrollHeight;
+  updateAiPanelState();
+}
+
+function renderAiMetaBlock(title, items) {
+  return '<div class="ai-meta-block"><div class="ai-meta-title">' + esc(title) + '</div><ol class="ai-meta-list">' +
+    items.map(item => '<li>' + esc(item) + '</li>').join('') +
+    '</ol></div>';
+}
+
+function renderAiInteraction(interaction, msgIndex) {
+  const options = interaction.options || [];
+  let html = '<div class="ai-interaction">';
+  options.forEach(option => {
+    html += '<button class="ai-option-btn" data-msg-index="' + escAttr(String(msgIndex)) + '" data-option-id="' + escAttr(option.id || '') + '" ' + (aiLoading ? 'disabled' : '') + '>';
+    html += '<span class="ai-option-label">' + esc(option.label || option.id || '候选') + '</span>';
+    if (option.description) {
+      html += '<span class="ai-option-desc">' + esc(option.description) + '</span>';
+    }
+    html += '</button>';
+  });
+  if (interaction.allowCustomAnswer) {
+    html += '<div class="ai-custom-row">';
+    html += '<input id="aiCustom_' + msgIndex + '" placeholder="自定义回答" ' + (aiLoading ? 'disabled' : '') + ' />';
+    html += '<button class="ai-custom-confirm" data-msg-index="' + escAttr(String(msgIndex)) + '" ' + (aiLoading ? 'disabled' : '') + '>确认</button>';
+    html += '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+async function sendAiQuestion() {
+  if (!currentBookId || aiLoading) return;
+  const input = document.getElementById('aiQuestionInput');
+  const question = input.value.trim();
+  if (!question) return;
+
+  aiMessages.push({ role: 'user', content: question });
+  input.value = '';
+  aiLoading = true;
+  renderAiMessages();
+
+  try {
+    const userId = hasAuthUser() && currentUser.id != null ? String(currentUser.id) : guestUserId;
+    const resp = await api('POST', '/api/ai/chat', {
+      bookId: currentBookId,
+      chapterIndex: currentChapterIndex,
+      question,
+      userId,
+      sessionId: aiSessionId || ('book_' + currentBookId + '_chapter_' + currentChapterIndex),
+      contextId: aiContextId,
+      topK: 5,
+      enableMemory: true,
+      enableRag: true,
+      enableExternalMcp: true,
+      chapterTitle: currentChapterTitle,
+      chapterContent: currentChapterContent,
+      selectedText: selectedReadingPayload().selectedText || null,
+      selectedContext: selectedReadingPayload().selectedContext || null
+    });
+
+    if (resp && resp.contextId != null) aiContextId = resp.contextId;
+    if (resp && resp.sessionId) aiSessionId = resp.sessionId;
+    aiMessages.push({
+      role: 'assistant',
+      content: (resp && resp.answer) ? resp.answer : '模型没有返回有效回答。',
+      status: (resp && resp.status) || 'completed',
+      interaction: (resp && resp.interaction) || null,
+      sources: (resp && resp.sources) || [],
+      memoryRefs: (resp && resp.memoryRefs) || [],
+      externalMcpPlanRefs: (resp && resp.externalMcpPlanRefs) || [],
+      externalMcpRefs: (resp && resp.externalMcpRefs) || []
+    });
+  } catch (e) {
+    aiMessages.push({
+      role: 'error',
+      content: 'AI请求失败：' + (e && e.message ? e.message : '请稍后重试')
+    });
+  } finally {
+    aiLoading = false;
+    renderAiMessages();
+  }
+}
+
+async function confirmAiOption(msgIndex, optionId) {
+  const msg = aiMessages[msgIndex];
+  if (!msg || !msg.interaction || aiLoading) return;
+  const option = (msg.interaction.options || []).find(item => item.id === optionId);
+  const label = option ? option.label : optionId;
+  await sendAiConfirmation(msg.interaction.confirmationId, label, optionId, null);
+}
+
+async function confirmAiCustom(msgIndex) {
+  const msg = aiMessages[msgIndex];
+  if (!msg || !msg.interaction || aiLoading) return;
+  const input = document.getElementById('aiCustom_' + msgIndex);
+  const customAnswer = input ? input.value.trim() : '';
+  if (!customAnswer) return;
+  await sendAiConfirmation(msg.interaction.confirmationId, customAnswer, null, customAnswer);
+}
+
+async function sendAiConfirmation(confirmationId, displayText, selectedOptionId, customAnswer) {
+  if (!currentBookId || aiLoading || !confirmationId) return;
+  aiMessages.push({ role: 'user', content: displayText });
+  aiLoading = true;
+  renderAiMessages();
+
+  try {
+    const userId = hasAuthUser() && currentUser.id != null ? String(currentUser.id) : guestUserId;
+    const resp = await api('POST', '/api/ai/chat', {
+      bookId: currentBookId,
+      chapterIndex: currentChapterIndex,
+      question: displayText,
+      userId,
+      sessionId: aiSessionId || ('book_' + currentBookId + '_chapter_' + currentChapterIndex),
+      contextId: aiContextId,
+      topK: 5,
+      enableMemory: true,
+      enableRag: true,
+      enableExternalMcp: true,
+      confirmationId,
+      selectedOptionId,
+      customAnswer,
+      chapterTitle: currentChapterTitle,
+      chapterContent: currentChapterContent,
+      selectedText: selectedReadingPayload().selectedText || null,
+      selectedContext: selectedReadingPayload().selectedContext || null
+    });
+
+    if (resp && resp.contextId != null) aiContextId = resp.contextId;
+    if (resp && resp.sessionId) aiSessionId = resp.sessionId;
+    aiMessages.push({
+      role: 'assistant',
+      content: (resp && resp.answer) ? resp.answer : '模型没有返回有效回答。',
+      status: (resp && resp.status) || 'completed',
+      interaction: (resp && resp.interaction) || null,
+      sources: (resp && resp.sources) || [],
+      memoryRefs: (resp && resp.memoryRefs) || [],
+      externalMcpPlanRefs: (resp && resp.externalMcpPlanRefs) || [],
+      externalMcpRefs: (resp && resp.externalMcpRefs) || []
+    });
+  } catch (e) {
+    aiMessages.push({
+      role: 'error',
+      content: '确认失败：' + (e && e.message ? e.message : '请重新发起问题')
+    });
+  } finally {
+    aiLoading = false;
+    renderAiMessages();
+  }
+}
+
+// ========== 招聘功能 ==========
+async function loadJobs() {
+  const listEl = document.getElementById('jobsList');
+  listEl.innerHTML = '<div class="loading">加载中...</div>';
+  try {
+    const resp = await api('GET', '/api/jobs');
+    allJobs = Array.isArray(resp) ? resp : ((resp && resp.data) || []);
+    renderJobs(allJobs);
+  } catch (e) { listEl.innerHTML = '<div class="empty-state">加载失败</div>'; }
+}
+
+function searchJobs() {
+  const kw = document.getElementById('jobSearchInput').value.trim().toLowerCase();
+  const city = document.getElementById('jobCitySelect').value;
+  let f = allJobs;
+  if (kw) f = f.filter(j => (j.title+'').toLowerCase().includes(kw) || (j.company+'').toLowerCase().includes(kw) || (j.skills||[]).some(s => s.toLowerCase().includes(kw)));
+  if (city) f = f.filter(j => (j.location+'').includes(city));
+  renderJobs(f);
+}
+
+function renderJobs(jobs) {
+  const listEl = document.getElementById('jobsList');
+  if (!jobs.length) { listEl.innerHTML = '<div class="empty-state">未找到符合条件的职位</div>'; return; }
+  listEl.innerHTML = '<div class="jobs-grid">' + jobs.map(j => {
+    const skillsHtml = (j.skills||[]).map(s => '<span class="skill-tag">'+esc(s)+'</span>').join('');
+    const welfareHtml = (j.welfare||'').split(/[,，]/).filter(w => w.trim()).map(w => '<span class="welfare-tag">'+esc(w.trim())+'</span>').join('');
+    const respHtml = (j.responsibility||'').split('\n').filter(r => r.trim()).map(r => '<li>'+esc(r.replace(/^[0-9]+[.、]/,'').trim())+'</li>').join('');
+    const reqHtml = (j.requirement||'').split('\n').filter(r => r.trim()).map(r => '<li>'+esc(r.replace(/^[0-9]+[.、]/,'').trim())+'</li>').join('');
+
+    return `<div class="job-card">
+      <div class="job-header">
+        <div>
+          <div class="job-title">${esc(j.title||'')}</div>
+          <div class="job-company">${esc(j.company||'')}</div>
+        </div>
+        <div class="job-salary">${esc(j.salary||'薪资面议')}</div>
+      </div>
+      <div class="job-badges">
+        <span class="job-badge">📍 ${esc(j.location||'')}</span>
+        <span class="job-badge">💼 ${esc(j.workYear||'')}</span>
+        <span class="job-badge">🎓 ${esc(j.degree||'')}</span>
+      </div>
+      ${respHtml ? `<div class="job-section"><div class="job-section-title">岗位职责</div><div class="job-section-content"><ul>${respHtml}</ul></div></div>` : ''}
+      ${reqHtml ? `<div class="job-section"><div class="job-section-title">岗位要求</div><div class="job-section-content"><ul>${reqHtml}</ul></div></div>` : ''}
+      ${skillsHtml ? `<div class="job-section"><div class="job-section-title">技能要求</div><div class="job-skills">${skillsHtml}</div></div>` : ''}
+      ${welfareHtml ? `<div class="job-welfare">${welfareHtml}</div>` : ''}
+    </div>`;
+  }).join('') + '</div>';
+}
+
+// ========== 新闻功能 ==========
+async function loadNews() {
+  const listEl = document.getElementById('newsList');
+  listEl.innerHTML = '<div class="loading">加载中（翻译中...）</div>';
+  try {
+    const resp = await api('GET', '/api/news');
+    allNews = Array.isArray(resp) ? resp : ((resp && resp.data) || []);
+    renderNews(allNews);
+  } catch (e) { listEl.innerHTML = '<div class="empty-state">加载失败</div>'; }
+}
+
+function searchNews() {
+  const kw = document.getElementById('newsSearchInput').value.trim().toLowerCase();
+  const cat = document.getElementById('newsCategorySelect').value;
+  let f = allNews;
+  if (kw) f = f.filter(n => (n.title+'').toLowerCase().includes(kw) || (n.titleCn+'').toLowerCase().includes(kw) || (n.description+'').toLowerCase().includes(kw));
+  if (cat) f = f.filter(n => (n.category+'') === cat);
+  renderNews(f);
+}
+
+function renderNews(newsList) {
+  const listEl = document.getElementById('newsList');
+  if (!newsList.length) { listEl.innerHTML = '<div class="empty-state">未找到符合条件的资讯</div>'; return; }
+
+  const icons = ['🌐', '🤖', '💻', '📱', '☁️', '🔒', '🚀', '🌟'];
+  const cats = ['科技', '国际', '商业', '科学'];
+
+  let html = '<div class="news-grid">';
+  newsList.forEach((n, i) => {
+    const icon = icons[i % icons.length];
+    const isFeatured = i === 0;
+    const titleShow = (n.titleCn && n.titleCn !== n.title) ? n.titleCn : (n.title||'');
+    const descShow = (n.descriptionCn && n.descriptionCn !== n.description) ? n.descriptionCn : (n.description||'');
+
+    html += `<div class="news-card ${isFeatured?'featured':''}" onclick="window.open('${esc(n.link||'#')}','_blank')">
+      <div class="news-img"><span class="news-img-icon">${icon}</span></div>
+      <div class="news-body">
+        <span class="news-category">${cats[i%4]}</span>
+        <div class="news-title">${esc(titleShow)}</div>
+        ${n.titleCn&&n.titleCn!==n.title?'<div class="news-title-en">'+esc(n.title)+'</div>':''}
+        <div class="news-desc">${esc(descShow)}</div>
+        <div class="news-meta">
+          <span>${esc(n.source||'')} · ${esc(n.pubDate||'')}</span>
+          ${n.link?'<a class="news-link" href="'+esc(n.link)+'" target="_blank" onclick="event.stopPropagation()">查看原文 →</a>':''}
+        </div>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  listEl.innerHTML = html;
+}
+
+// ========== 工具 ==========
+function esc(t) { if(!t)return''; const d=document.createElement('div'); d.textContent=t; return d.innerHTML; }
+function escAttr(t) { return esc(t).replace(/'/g, '&#39;'); }
+
+function renderAiContent(content, role) {
+  if (role !== 'assistant') {
+    return esc(content);
+  }
+  const lines = String(content || '').replace(/\r\n/g, '\n').split('\n');
+  let html = '';
+  let paragraph = [];
+  let listType = null;
+
+  function flushParagraph() {
+    if (!paragraph.length) return;
+    html += '<p>' + inlineMarkdown(paragraph.join('<br>')) + '</p>';
+    paragraph = [];
+  }
+
+  function closeList() {
+    if (!listType) return;
+    html += '</' + listType + '>';
+    listType = null;
+  }
+
+  lines.forEach(rawLine => {
+    const line = rawLine.trim();
+    if (!line) {
+      flushParagraph();
+      closeList();
+      return;
+    }
+
+    const ordered = line.match(/^(\d+)[.、]\s*(.+)$/);
+    const unordered = line.match(/^[-*]\s+(.+)$/);
+    if (ordered || unordered) {
+      flushParagraph();
+      const nextType = ordered ? 'ol' : 'ul';
+      if (listType !== nextType) {
+        closeList();
+        html += '<' + nextType + '>';
+        listType = nextType;
+      }
+      html += '<li>' + inlineMarkdown(ordered ? ordered[2] : unordered[1]) + '</li>';
+      return;
+    }
+
+    closeList();
+    paragraph.push(esc(line));
+  });
+
+  flushParagraph();
+  closeList();
+  return html || esc(content);
+}
+
+function inlineMarkdown(escapedText) {
+  return escapedText
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+}
+
+document.getElementById('aiQuestionInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendAiQuestion();
+  }
+});
+
+document.getElementById('aiMessages').addEventListener('click', function(e) {
+  const optionButton = e.target.closest('.ai-option-btn');
+  if (optionButton) {
+    confirmAiOption(Number(optionButton.dataset.msgIndex), optionButton.dataset.optionId || '');
+    return;
+  }
+  const customButton = e.target.closest('.ai-custom-confirm');
+  if (customButton) {
+    confirmAiCustom(Number(customButton.dataset.msgIndex));
+  }
+});
+
+document.getElementById('chapterContent').addEventListener('mouseup', captureReadingSelection);
+document.getElementById('chapterContent').addEventListener('keyup', captureReadingSelection);
+document.getElementById('chapterContent').addEventListener('touchend', function() {
+  setTimeout(captureReadingSelection, 0);
+});
+document.getElementById('aiSelectionClear').addEventListener('click', clearSelectedReadingContext);
+
+restoreUser();
+restoreReaderStyle();
+updateUserStatus();
+loadBookshelf();
+updateAiPanelState();
+renderAiMessages();
+</script>
+</body>
+</html>

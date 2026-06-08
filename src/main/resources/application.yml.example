@@ -1,0 +1,93 @@
+server:
+  port: 8080
+
+spring:
+  servlet:
+    multipart:
+      max-file-size: 200MB
+      max-request-size: 220MB
+  datasource:
+    url: jdbc:mysql://localhost:3306/http_reading?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: your_database_username
+    password: your_database_password
+  data:
+    redis:
+      host: localhost
+      port: 6379
+  jpa:
+    hibernate:
+      ddl-auto: update
+  elasticsearch:
+    uris: http://localhost:9200
+    connection-timeout: 1s
+    socket-timeout: 30s
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+
+cache:
+  enabled: true
+
+http-reading:
+  storage:
+    root: ${HTTP_READING_STORAGE_ROOT:${user.home}/.http-reading}
+
+memory:
+  storage: mysql
+
+mcp:
+  client:
+    servers:
+      - name: self-local
+        description: "本地 MCP 调试服务"
+        url: http://localhost:8080/mcp
+        enabled: false
+        timeoutSeconds: 10
+        headers: {}
+        allowedTools:
+          - context_build
+      - name: github
+        description: "GitHub MCP 服务"
+        url: https://api.githubcopilot.com/mcp/
+        enabled: false
+        timeoutSeconds: 20
+        headers:
+          Authorization: Bearer ${GITHUB_TOKEN:}
+        allowedTools:
+          - get_me
+          - search_repositories
+          - get_file_contents
+          - search_code
+          - list_branches
+          - list_commits
+          - get_commit
+
+vector-db:
+  type: Qdrant
+  url: ${VECTOR_DB_URL:}
+  api-key: ${VECTOR_DB_API_KEY:}
+  collection: ${VECTOR_DB_COLLECTION:hello_agents_vectors}
+  vector-size: 1024
+  distance: cosine
+  timeout: 30
+
+logging:
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{reqId}] %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level [%X{reqId}] %logger{36} - %msg%n"
+  file:
+    name: server.log
+  level:
+    root: INFO
+    com.example.httpreading: DEBUG
+    io.modelcontextprotocol.client.LifecycleInitializer: ERROR
+
+model:
+  apiKey: ${MODEL_API_KEY:}
+  embedding:
+    type: ${EMBEDDING_TYPE:dashscope}
+    apiKey: ${EMBEDDING_API_KEY:}
+    embeddingModel: ${EMBEDDING_MODEL:text-embedding-v3}
+    baseUrl: ${EMBEDDING_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}

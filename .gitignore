@@ -1,0 +1,61 @@
+# =========================
+# Maven / Java
+# =========================
+target/
+*.class
+*.jar
+*.war
+
+# =========================
+# IDE
+# =========================
+.idea/
+*.iml
+.vscode/
+
+# =========================
+# Spring Boot Config
+# =========================
+src/main/resources/application.yml
+src/main/resources/application-*.yml
+
+# =========================
+# Environment Variables
+# =========================
+.env
+.env.*
+
+# =========================
+# Logs
+# =========================
+logs/
+*.log
+*.gz
+*.tmp
+server.log*
+
+# =========================
+# Runtime Files
+# =========================
+BOOT-INF/
+
+# =========================
+# Credentials
+# =========================
+cookies.txt
+
+# =========================
+# Personal Files
+# =========================
+*.docx
+*.pdf
+
+# 如果你不想上传这些个人记录
+resume_text.txt
+memory/
+
+# =========================
+# OS
+# =========================
+.DS_Store
+Thumbs.db
