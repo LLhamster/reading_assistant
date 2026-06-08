@@ -1,179 +1,181 @@
 # HTTP Reading - 智能阅读平台
 
-> 一个基于 Java Spring Boot 的在线阅读平台，经历 8 周升级后将成为"有搜索、有异步事件、有监控、有书内问答"的智能阅读平台。
+> 一个基于 Java Spring Boot 的阅读与问答平台，围绕“书籍管理、阅读进度、全文搜索、RAG 问答、记忆系统、MCP 工具接入”逐步演进。
 
 ---
 
-## 项目规划
+## 项目简介
 
-- 📋 **升级计划**：[8-WEEK-PLAN.md](./8-WEEK-PLAN.md)（8周详细任务清单）
-- 📝 **迭代记录**：[CHANGELOG.md](./CHANGELOG.md)
+这个项目的核心目标，是把“读书”从单纯的内容展示，升级成一个可以检索、可以追问、可以记忆上下文、可以接入外部工具的智能阅读系统。
+
+当前项目已经覆盖了以下方向：
+
+- 用户注册、登录与身份认证
+- 书籍浏览、章节查看、阅读进度记录
+- 书架收藏与个人阅读状态管理
+- 章节内容问答与检索增强回答
+- 文档导入、切片、向量化与检索
+- 会话记忆、上下文构建与提示词拼装
+- MCP 工具暴露与外部 MCP 服务调用
+- Redis 缓存、消息队列、日志与基础监控能力
 
 ---
 
-## 当前技术栈
+## 当前能力
+
+### 1. 账号与访问控制
+
+- 支持用户注册、登录与 JWT 无状态认证
+- 通过安全过滤链保护需要登录的接口
+- 对异常登录、无权限访问等场景做统一处理
+
+### 2. 书籍与阅读
+
+- 支持书籍列表、详情、章节列表与章节内容查看
+- 支持书架收藏，且对重复收藏做幂等处理
+- 支持阅读进度记录与恢复，方便用户继续阅读
+- 静态阅读页面可直接访问，用于快速查看内容
+
+### 3. 检索与问答
+
+- 支持对书籍和章节内容进行全文检索
+- 支持将文档拆分为片段后做向量检索
+- 支持基于检索结果生成答案，提高回答与原文的相关性
+- 支持返回引用来源，方便用户追溯答案依据
+
+### 4. 记忆与上下文
+
+- 支持保存阅读问答过程中的关键记忆
+- 支持按用户和会话维度检索历史记忆
+- 支持把历史对话、外部输入片段和系统提示拼装成统一上下文
+- 支持上下文压缩与长度控制，适配后续模型调用
+
+### 5. MCP 接入
+
+- 项目本身可以作为 MCP Server，对外提供标准化工具能力
+- 项目也可以作为 MCP Client，按配置调用外部 MCP 服务
+- 支持工具白名单、超时设置、调用路由与结果解析
+- 支持在候选目标不明确时，让用户二次确认后继续执行
+
+### 6. 数据与基础设施
+
+- MySQL 负责核心业务数据存储
+- Redis 用于缓存和部分状态管理
+- Elasticsearch、RabbitMQ、Qdrant 等组件已纳入配置体系
+- 支持日志分级、结构化日志输出和本地调试
+
+---
+
+## 模块划分
+
+### 接口层
+
+负责接收 HTTP 请求，向外提供用户、书籍、阅读、问答和 MCP 相关接口。
+
+### 业务层
+
+负责处理书籍、章节、书架、阅读进度、检索、记忆、问答等核心流程。
+
+### 检索层
+
+负责文档解析、切片、向量化、召回和相关内容排序。
+
+### 上下文层
+
+负责整理会话历史、记忆片段和用户输入，生成适合模型使用的上下文。
+
+### MCP 层
+
+负责工具注册、外部服务选择、工具调用控制、确认交互与调用结果封装。
+
+### 基础设施层
+
+负责数据库、缓存、消息队列、日志、配置和外部服务连接。
+
+---
+
+## 主要技术
 
 | 类别 | 技术 |
 |------|------|
 | 框架 | Spring Boot 3.3.4（Java 17） |
 | 持久层 | Spring Data JPA + MySQL |
-| 缓存 | Spring Data Redis（穿透/击穿/雪崩防护） |
-| 安全 | Spring Security + JWT（BCrypt密码加密） |
-| AI | Moonshot（Kimi）大模型 API |
-| 构建 | Maven + Docker |
-
-## 已完成功能
-
-- ✅ 用户系统（注册/登录，JWT无状态认证）
-- ✅ 书籍管理（分页浏览、关键词搜索、书籍详情、章节列表）
-- ✅ 书架功能（用户收藏书籍，支持幂等）
-- ✅ 阅读进度（记录并恢复阅读位置，Redis缓存）
-- ✅ AI 问答（基于章节内容调用Kimi大模型）
-- ✅ 统一返回体（`CommonResponse<T>`）
-- ✅ 全局异常处理
-- ✅ Docker 一键部署（MySQL + Redis + Spring Boot）
-
-## 升级中功能（8周计划）
-
-| 周次 | 主题 | 状态 |
-|------|------|------|
-| W1 | 工程基础（Swagger、参数校验、错误码） | ⬜ |
-| W2 | 日志、测试、数据准备 | ⬜ |
-| W3 | JMeter压测 + 性能优化 | ⬜ |
-| W4 | Elasticsearch全文搜索 | ⬜ |
-| W5 | RabbitMQ异步事件 | ⬜ |
-| W6 | Micrometer + Prometheus + Grafana监控 | ⬜ |
-| W7 | 书内RAG问答 | ⬜ |
-| W8 | SSE流式输出 + 项目收尾 | ⬜ |
+| 缓存 | Spring Data Redis |
+| 安全 | Spring Security + JWT |
+| 检索 | Elasticsearch + 向量检索 |
+| 消息 | RabbitMQ |
+| AI | 外部大模型 API、RAG、MCP 工具调用 |
+| 构建 | Maven |
+| 部署 | Docker / Docker Compose |
 
 ---
 
-## 项目结构
+## 配置说明
 
-```
-java_src/
-├── pom.xml
-├── Dockerfile
-├── docker-compose.yml
-├── README.md
-├── CHANGELOG.md
-├── 8-WEEK-PLAN.md          # 8周升级计划
-│
-└── src/main/
-    ├── resources/
-    │   ├── application.yml
-    │   └── static/
-    │       └── reader.html
-    │
-    └── java/com/example/httpreading/
-        ├── HttpReadingApplication.java
-        │
-        ├── api/
-        │   ├── CommonResponse.java
-        │   └── GlobalExceptionHandler.java
-        │
-        ├── controller/
-        │   ├── UserController.java      # /api/auth/*
-        │   ├── BooksController.java     # /api/books/*
-        │   ├── BookshelfController.java # /api/user/bookshelf/*
-        │   ├── ReadingController.java   # /api/user/books/*/progress
-        │   └── AiChatController.java    # /api/ai
-        │
-        ├── domain/
-        │   ├── entity/ (Books, Chapters)
-        │   └── user/ (User, Bookshelf, Reading)
-        │
-        ├── dto/
-        │   └── AuthRequest.java
-        │
-        ├── repository/
-        │
-        ├── security/
-        │   ├── JwtService.java
-        │   ├── JwtAuthFilter.java
-        │   └── SecurityConfig.java
-        │
-        └── service/
-            ├── UserService.java
-            ├── BooksService.java         # Redis缓存（穿透/击穿/雪崩）
-            ├── ChaptersService.java
-            ├── BookshelfService.java
-            ├── ReadingService.java       # Redis缓存
-            ├── AiChatService.java
-            └── ModelClient.java         # Kimi API封装
-```
+建议本地开发时使用 [src/main/resources/application.yml.example](src/main/resources/application.yml.example) 作为模板，再复制为 [src/main/resources/application.yml](src/main/resources/application.yml) 并填写自己的真实配置。
 
----
+配置主要包含以下内容：
 
-## 配置文件
-
-`src/main/resources/application.yml` 关键配置项：
-
-```yaml
-server:
-  port: 8080
-
-spring:
-  datasource:
-    url: jdbc:mysql://${SPRING_DATASOURCE_HOST:mysql}:3306/${SPRING_DATASOURCE_NAME:bookstore}
-    username: ${SPRING_DATASOURCE_USERNAME:root}
-    password: ${SPRING_DATASOURCE_PASSWORD:root123}
-  data:
-    redis:
-      host: ${SPRING_REDIS_HOST:redis}
-      port: ${SPRING_REDIS_PORT:6379}
-
-cache:
-  enabled: true   # true=启用Redis缓存，false=禁用缓存直连数据库
-
-model:
-  apiKey: "sk-..."   # Moonshot API Key
-```
-
----
-
-## 接口一览
-
-| 方法 | 路径 | 说明 | 认证 |
-|------|------|------|------|
-| POST | `/api/auth/register` | 用户注册 | 否 |
-| POST | `/api/auth/login` | 用户登录，返回JWT | 否 |
-| GET | `/api/books` | 分页查询书籍（关键词搜索） | 否 |
-| GET | `/api/books/{id}` | 获取书籍详情 | 否 |
-| GET | `/api/books/{id}/chapters` | 获取书籍章节列表 | 否 |
-| GET | `/api/books/{id}/chapters/{index}` | 获取章节内容 | 否 |
-| GET | `/api/user/bookshelf` | 获取用户书架 | 是 |
-| POST | `/api/user/bookshelf/{bookId}` | 添加书籍到书架 | 是 |
-| GET | `/api/user/books/{bookId}/progress` | 获取阅读进度 | 是 |
-| POST | `/api/user/books/{bookId}/progress` | 更新阅读进度 | 是 |
-| GET | `/api/ai` | AI章节问答（基于Kimi） | 否 |
+- 服务器端口与文件上传限制
+- MySQL、Redis、Elasticsearch、RabbitMQ 连接信息
+- 缓存开关
+- 本地存储目录
+- MCP 客户端列表与工具白名单
+- 向量数据库连接参数
+- 模型 API Key 与嵌入模型配置
 
 ---
 
 ## 本地运行
 
-```bash
-# 开发环境
-mvn spring-boot:run
+### 方式一：直接启动
 
-# Docker环境（需要 Docker Desktop）
+```bash
+mvn spring-boot:run
+```
+
+### 方式二：打包后启动
+
+```bash
+mvn clean package
+java -jar target/*.jar
+```
+
+### 方式三：Docker
+
+```bash
 docker compose up --build
 ```
 
-访问 `http://localhost:8080/reader.html` 打开阅读器页面。
+启动后可访问阅读页面和后端接口，默认端口为 `8080`。
 
 ---
 
-## 面试话术（最终简历版本）
+## 项目结构
 
+```text
+java_src/
+├── pom.xml
+├── docker-compose.yml
+├── Dockerfile
+├── README.md
+├── src/main/
+│   ├── resources/
+│   │   ├── application.yml
+│   │   ├── application.yml.example
+│   │   └── static/
+│   │       └── reader.html
+│   └── java/com/example/httpreading/
+│       ├── controller/
+│       ├── service/
+│       ├── context/
+│       ├── memory/
+│       ├── mcp/
+│       ├── mq/
+│       ├── repository/
+│       ├── security/
+│       ├── config/
+│       ├── domain/
+│       └── dto/
 ```
-智能阅读平台｜Java 后端项目
-技术栈：Spring Boot / MySQL / Redis / Elasticsearch / RabbitMQ / Prometheus / Grafana / Kimi API
 
-- 设计用户、书籍、书架、阅读进度等核心模块，完成 RESTful API 开发，并通过统一错误码、参数校验与接口文档提升后端工程规范性。
-- 针对热点访问场景设计 Redis 缓存方案，结合 JMeter 压测、慢查询分析与索引优化完成性能调优，在模拟数据库慢查询场景下将核心接口响应时间由 30ms 降至 11ms。
-- 引入 Elasticsearch 构建书籍与章节全文索引，实现关键词检索、高亮展示与相关性排序，优化搜索体验。
-- 基于 RabbitMQ 将阅读行为、搜索日志与问答记录异步化，并通过手动确认、重试与幂等处理提升消息消费可靠性。
-- 基于 Micrometer、Prometheus 与 Grafana 构建监控体系，对接口耗时、JVM、缓存命中率与消息积压情况进行可视化监控。
-- 构建书内 RAG 问答链路，基于章节片段检索增强 Kimi API 回答效果，并通过 SSE 实现流式输出与引用来源返回。
-```
