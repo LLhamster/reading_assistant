@@ -93,6 +93,27 @@ class McpToolOrchestratorTest {
     }
 
     @Test
+    void boundedReactWithSelectedMcpServerDelegatesToAgentServerOverload() {
+        AiChatRequest request = request();
+        request.setEnableExternalMcp(true);
+        when(externalMcpAgentService.execute(eq(request), any(), eq("github")))
+            .thenReturn(new ExternalMcpAgentResult(
+                List.of(ExternalMcpCallResult.success("github", "search_repositories", "content")),
+                List.of("MCP_ROUTE github: selected by Planner", "AUTO_COMPLETE"),
+                ""));
+
+        ToolExecutionResult result = orchestrator.execute(request, plan(
+            ToolExecutionMode.BOUNDED_REACT,
+            List.of("mcp.server:github"),
+            List.of()));
+
+        assertEquals(1, result.results().size());
+        assertTrue(result.planRefs().stream().anyMatch(ref -> ref.contains("MCP_ROUTE github")));
+        verify(externalMcpAgentService).execute(eq(request), any(), eq("github"));
+    }
+
+
+    @Test
     void deterministicModeBlocksToolsOutsideAllowedList() {
         ToolExecutionResult result = orchestrator.execute(request(), plan(
             ToolExecutionMode.SINGLE_TOOL,

@@ -49,6 +49,16 @@ public class ExternalMcpAgentService {
         return run(new PendingMcpAgentState(copyRequest(request), planningContext));
     }
 
+    public ExternalMcpAgentResult execute(AiChatRequest request, String planningContext, String routedServerName) {
+        pendingStore.cancel(request.resolvedUserId(), request.resolvedSessionId());
+        PendingMcpAgentState state = new PendingMcpAgentState(copyRequest(request), planningContext);
+        state.setRoutedServerName(routedServerName);
+        if (!state.getRoutedServerName().isBlank()) {
+            state.getRefs().add("MCP_ROUTE " + state.getRoutedServerName() + ": selected by Planner");
+        }
+        return run(state);
+    }
+
     public void cancelPending(AiChatRequest request) {
         pendingStore.cancel(request.resolvedUserId(), request.resolvedSessionId());
     }

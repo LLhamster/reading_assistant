@@ -2009,3 +2009,793 @@ AUTO_COMPLETE README 已取得
 #### 6. 如果让我自己重写，最应该保留哪部分，最应该质疑哪部分？
 - 最应该保留：prompt 记忆和响应记忆必须来自同一选择结果。
 - 最应该质疑：前端是否需要一个调试模式，额外展示“召回但未使用”的记忆。
+
+## 2026-06-08：阅读问答案例/故事型追问意图改造
+
+### 改动概括
+- 修复用户追问“举一个实际的例子”“把某个企业故事完整说出来”时，系统仍按普通概念解释模板回答的问题。
+- Planner 现在识别阅读问答的子意图，并把案例/故事型问题转换为更强的 standalone question 和 RAG 查询。
+- FinalAnswerService 增加案例/故事型答案要求与质量检查，不合格时自动重写一次。
+
+### 新增内容
+- 新增 `src/main/java/com/example/httpreading/service/ai/SubIntent.java`
+  - 支持 `CONCRETE_EXAMPLE`、`HISTORICAL_CASE`、`STORYTELLING_CASE`、`AVOID_REPEAT_EXPLANATION`、`DETAIL_REQUIRED` 等子意图。
+- 新增 `src/main/java/com/example/httpreading/service/ai/AnswerRequirement.java`
+  - 描述是否要求具体例子、具体实体、故事叙述、详细过程、避免概念开头和避免重复上一轮解释。
+- 新增 `src/main/java/com/example/httpreading/service/ai/DetailLevel.java`
+  - 标记答案细节密度要求。
+
+### 修改内容
+- `ChatPlan`
+  - 新增 `subIntent` 和 `answerRequirement`。
+  - 保留旧构造器，避免已有测试和调用点大面积改动。
+- `PlannerService`
+  - 识别“举个例子/真实案例/具体是谁/用案例说明”等为 `CONCRETE_EXAMPLE`。
+  - 识别“完整说出来/讲一个完整故事/讲清楚发展过程/不要只概括”等为 `STORYTELLING_CASE`。
+  - 当“举例”和“完整说出来”同时出现时，优先使用 `STORYTELLING_CASE`。
+  - 对案例/故事型问题改写 standalone question，避免只拿“举一个实际的例子”这类弱查询去检索。
+  - 对案例/故事型问题追加多条 RAG 查询，围绕案例、人物、企业、事件、过程、政策背景检索。
+- `FinalAnswerService`
+  - 当 `requiresConcreteExample=true` 时，要求直接给出具体例子、人物/群体、处境、处理方式和如何对应原文观点。
+  - 当 `requiresStorytelling=true` 时，要求直接进入案例故事，讲起点、发展、转折、结果，再回扣原文。
+  - 增加质量检查：如果案例/故事回答仍停留在概念解释、缺少具体实体或缺少过程，会重新生成一次。
+  - 如果证据不足，要求回答“当前资料只支持概念解释，暂时不能给出有出处的具体案例”，避免编造。
+- 测试
+  - `PlannerServiceTest` 增加具体例子和完整故事子意图识别测试。
+  - `FinalAnswerServiceTest` 增加故事型答案不合格后重写的测试。
+
+### 验证结果
+- 已执行完整回归：
+  ```bash
+  mvn test
+  ```
+- 结果：
+  ```text
+  Tests run: 87, Failures: 0, Errors: 0, Skipped: 0
+  ```
+
+### 设计决策说明
+
+#### 1. 本次实现做了哪些设计决策？
+- 在 `ChatPlan` 内增加 `subIntent` 和 `answerRequirement`，而不是只靠 `taskType=READING_QA`。
+- 第一版使用规则识别案例/故事子意图，而不是再引入一次模型规划调用。
+- 对案例/故事型问题进行多查询 RAG 检索，而不是只检索用户原句。
+- 在 `FinalAnswerService` 内做一次轻量质量检查，不合格时重写一次。
+
+#### 2. 每个决策的可选方案有哪些？
+- 子意图可以放在 `PlannerTaskType` 中扩展，也可以单独建 `SubIntent`。
+- 意图识别可以使用规则、模型 JSON planner，或规则加模型混合。
+- RAG 查询可以只改写 standalone question，也可以生成多条查询。
+- 答案质量检查可以完全依赖 prompt，也可以代码启发式检查，或再调用模型评审。
+
+#### 3. 为什么选择当前方案？
+- `taskType` 描述大类，`subIntent` 描述回答形态，二者分开更清楚。
+- 规则识别对“举例子/完整说出来”这类表达稳定、可测试、成本低。
+- 多查询 RAG 能提升案例、人物、企业、过程类材料的召回概率。
+- 轻量质量检查能拦住最常见失败：用户要案例，模型仍复述概念。
+
+#### 4. 当前方案适合什么场景？
+- 阅读问答中的追问、举例、历史案例、企业故事和详细过程说明。
+- 用户明确要求“不要只概括”“完整说出来”的问题。
+- 需要在不增加额外 planner 模型调用的前提下提升稳定性。
+
+#### 5. 当前方案不适合什么场景？
+- 用户要求非常开放的跨书、跨知识库案例，需要更强检索和外部资料。
+- RAG 本身没有收录具体案例，却希望模型凭常识补充的场景。
+- 需要严格事实核验和引用出处的历史考证场景。
+
+#### 6. 如果自己重写，最应该保留哪部分，最应该质疑哪部分？
+- 最应该保留：`subIntent + answerRequirement`，它把“回答形态”从普通阅读问答中拆了出来。
+- 最应该保留：案例/故事型问题的多查询 RAG 检索。
+- 最应该质疑：当前质量检查是启发式规则，后续可能需要升级为结构化 evaluator，避免误判或漏判。
+
+## 2026-06-08：阅读辅助型问题允许上下文锚定的模型常识补充
+
+### 改动概括
+- 修复阅读问答过度依赖 RAG/当前资料，导致“资料没有逐项列出就拒答”的问题。
+- Planner 新增回答模式与证据严格度：区分“只看原文”“阅读辅助 + 常识补充”“需要外部搜索/明确出处”。
+- FinalAnswerService 在理解辅助型问题中允许基于当前资料补充常识例子，但要求明确区分原文依据和补充说明。
+
+### 新增内容
+- 新增 `src/main/java/com/example/httpreading/service/ai/AnswerMode.java`
+  - 支持 `TEXT_ONLY`、`CONTEXT_ANCHORED_MODEL_KNOWLEDGE`、`EXTERNAL_SEARCH_REQUIRED`。
+- 新增 `src/main/java/com/example/httpreading/service/ai/EvidenceStrictness.java`
+  - 支持 `STRICT`、`MEDIUM`、`LOOSE`，用于控制最终回答对证据的保守程度。
+
+### 修改内容
+- `AnswerRequirement`
+  - 新增 `allowModelKnowledge`、`mustDistinguishTextEvidenceAndSupplement`、`avoidRepeatingSourcePhrases`。
+  - 案例、故事和理解辅助型问题默认允许上下文锚定的模型常识补充。
+- `ChatPlan`
+  - 新增 `answerMode` 和 `evidenceStrictness`。
+  - 保留旧构造器，避免破坏已有调用点。
+- `PlannerService`
+  - “举个例子/有哪些/具体有哪些/比如/现实中/生活中/怎么理解/说具体点”默认规划为 `CONTEXT_ANCHORED_MODEL_KNOWLEDGE`。
+  - “只根据原文/书里怎么说/不要补充/必须有出处”规划为 `TEXT_ONLY`。
+  - “最新/明确出处/具体史实/具体细节”等规划为 `EXTERNAL_SEARCH_REQUIRED`。
+  - 对“举个例子有哪些税”优先改写为农村税费负担的具体税种、费用、劳务和摊派问题，避免落入通用历史案例查询。
+- `FinalAnswerService`
+  - prompt 增加 answerMode/evidenceStrictness 说明。
+  - 当 `allowModelKnowledge=true` 时，不再因为 RAG 没逐项列出具体案例就直接拒答。
+  - 增加低价值复述检查：如果回答只重复“税、费、劳务、摊派”而没有具体项目，会触发重写。
+  - 对税费负担类追问要求至少出现多个具体项目，例如农业税、特产税、屠宰税、教育附加费、水利建设费、乡统筹、村提留、修路修渠出工、临时集资等。
+- 测试
+  - `PlannerServiceTest` 增加上下文锚定模型常识补充与严格原文模式测试。
+  - `FinalAnswerServiceTest` 增加“资料不足拒答需重写”和“只复述关键词需重写”测试。
+
+### 验证结果
+- 已执行局部回归：
+  ```bash
+  mvn test -Dtest=PlannerServiceTest,FinalAnswerServiceTest
+  ```
+- 结果：
+  ```text
+  Tests run: 12, Failures: 0, Errors: 0, Skipped: 0
+  ```
+
+### 设计决策说明
+
+#### 1. 本次实现做了哪些设计决策？
+- 在 `ChatPlan` 中直接加入 `answerMode` 和 `evidenceStrictness`，让最终回答阶段明确知道证据使用边界。
+- 保留 `TEXT_ONLY` 的严格模式，避免用户明确要求只看原文时系统擅自扩展。
+- 对阅读辅助型“举例/有哪些/具体点”问题开放模型常识补充，但要求显式区分原文和补充例子。
+- 用轻量质量检查拦截“只复述资料关键词”的回答。
+
+#### 2. 每个决策的可选方案有哪些？
+- 可以新增完整 `EvidencePolicy` record，也可以先用 `answerMode + evidenceStrictness + AnswerRequirement` 承载策略。
+- 模型常识补充可以完全放开，也可以只在理解辅助型子意图下启用。
+- 质量检查可以只靠 prompt，也可以用规则检查或模型评审。
+
+#### 3. 为什么选择当前方案？
+- 当前链路已有 `ChatPlan`，把回答模式放在计划中最少侵入，且便于测试。
+- 用户问题的核心不是要外部检索，而是要阅读辅助解释，所以不应把 RAG 空结果等同于不能回答。
+- 规则检查足够覆盖当前高频失败：回答只重复“税、费、劳务、摊派”，没有提供理解增量。
+
+#### 4. 当前方案适合什么场景？
+- 阅读时追问“举个例子”“有哪些”“具体点”“现实中是什么样”。
+- 当前资料提供了概念，但没有逐项列出具体例子的理解辅助场景。
+- 用户不要求严格出处，只希望把正在读的内容看懂。
+
+#### 5. 当前方案不适合什么场景？
+- 用户明确要求“只根据原文”“必须有出处”的问题。
+- 需要精确年份、政策细节、人物企业史实的事实核验问题。
+- 需要最新数据或外部资料的问题。
+
+#### 6. 如果自己重写，最应该保留哪部分，最应该质疑哪部分？
+- 最应该保留：`TEXT_ONLY` 与 `CONTEXT_ANCHORED_MODEL_KNOWLEDGE` 的分流，它直接解决“资料复读机”的问题。
+- 最应该保留：补充常识时必须区分“当前资料说了什么”和“为了理解补充什么”。
+- 最应该质疑：税费项目质量检查目前是启发式词表，后续可以抽成更通用的“具体项目密度”检查。
+
+## 2026-06-08：追问答案避免复述最近一轮助手回答
+
+### 改动概括
+- 修复用户连续追问时，系统把最近对话或 working memory 中的上一轮助手回答再次输出，导致两轮答案几乎一模一样的问题。
+- FinalAnswerService 现在会检查最终回答与最近助手回答的重合度，尤其拦截税费负担这类列表型答案的重复清单。
+
+### 新增内容
+- `FinalAnswerService` 新增重复检测辅助逻辑：
+  - 识别 `recent_dialogue` 和 memory 中的历史助手回答。
+  - 检查长文本片段是否被原样复用。
+  - 检查税费关键词清单是否高度重合。
+  - 如果回答没有“前面/上一轮/这次/具体场景/严格说”等追问承接动作，则判定为低价值重复。
+
+### 修改内容
+- `FinalAnswerService`
+  - prompt 增加规则：最近对话或相关记忆里已经有上一轮助手回答时，不能重新输出那段答案。
+  - 追问时要求补充新增解释、换成具体场景、说明区别，或用“前面已经列过，这次重点看……”自然承接。
+  - 质量检查中新增 `answerSubstantiallyRepeatsRecentAssistant(...)`。
+  - 修复提示中要求：如果前面已经列过税费名目，重写时改成具体场景、分类区别、为什么这些都会变成农民负担。
+- 测试
+  - `FinalAnswerServiceTest` 新增：当第二轮回答重复上一轮税费清单时，必须触发重写。
+
+### 验证结果
+- 已执行局部回归：
+  ```bash
+  mvn test -Dtest=FinalAnswerServiceTest
+  ```
+- 结果：
+  ```text
+  Tests run: 5, Failures: 0, Errors: 0, Skipped: 0
+  ```
+
+### 设计决策说明
+
+#### 1. 本次实现做了哪些设计决策？
+- 在 FinalAnswerService 做重复检测，而不是在 EvidenceAggregator 过滤掉最近对话。
+- 最近对话和 working memory 仍保留给模型理解追问指向，但不能被当作可复述正文。
+- 对税费清单采用领域词表检测，因为这是当前截图暴露出的高频失败模式。
+
+#### 2. 每个决策的可选方案有哪些？
+- 可以直接从 evidence 中移除上一轮助手回答，也可以保留 evidence 但在最终答案阶段约束使用方式。
+- 重复检测可以做字符相似度、关键词重合度、模型评审，或三者组合。
+- 税费清单可以写专门规则，也可以做通用实体列表相似度检测。
+
+#### 3. 为什么选择当前方案？
+- 完全移除最近对话会削弱追问理解能力；保留但禁止复述更符合阅读问答场景。
+- 字符片段 + 税费词表能覆盖“几乎一样”和“换了开头但清单一样”两种重复。
+- 规则实现轻量、可测试，不增加额外模型调用成本。
+
+#### 4. 当前方案适合什么场景？
+- 用户连续追问“有哪些/举例/具体点”，上一轮已经列过一组名词。
+- working memory 召回了上一轮助手回答，模型容易照搬的场景。
+- 税费负担这类列表型解释场景。
+
+#### 5. 当前方案不适合什么场景？
+- 用户明确要求“重复一遍”“整理成清单”“照刚才那样再列一次”。
+- 需要严格比较两个长答案语义相似度的开放问题。
+- 非税费领域的大型实体列表重复，后续需要抽象成通用列表相似度。
+
+#### 6. 如果自己重写，最应该保留哪部分，最应该质疑哪部分？
+- 最应该保留：最近对话可用于理解，但不能直接复述给用户。
+- 最应该保留：质量检查失败后自动重写一次，能快速修正明显重复。
+- 最应该质疑：税费词表是局部修复，后续最好升级成通用“上一轮答案相似度 + 本轮新增信息密度”检查。
+
+## 2026-06-08：区分“税”和“暗税”的阅读追问语义
+
+### 改动概括
+- 修复用户问“有哪些税”和“暗税有哪些”时，系统把两者混为同一类税费清单的问题。
+- “税”现在优先回答正式税种和税费名目；“暗税”优先回答隐性负担、变相收费、摊派、义务工、集资、价格剪刀差等“名义上不是税、效果像税”的负担。
+
+### 新增内容
+- `PlannerService` 新增暗税问题识别：
+  - 识别 `暗税`、`隐性税`、`隐形税`、`变相税`。
+  - 为暗税生成独立 standalone question 和 RAG 查询。
+- `FinalAnswerService` 新增暗税质量检查：
+  - 如果暗税回答缺少隐性负担、变相收费、摊派、义务工、集资或价格剪刀差等例子，会触发重写。
+  - 如果暗税回答主要列农业税、特产税、屠宰税等正式税种，会判定为混淆“税”和“暗税”并重写。
+
+### 修改内容
+- `PlannerService`
+  - 暗税问题不再走“农村税费负担中常见的具体税种”改写。
+  - 暗税 RAG 查询改为围绕“隐性负担、变相收费、摊派、劳务、乡统筹、村提留、义务工、集资”等检索。
+- `FinalAnswerService`
+  - prompt 明确要求：暗税不是正式税种，不要把农业税、特产税、屠宰税直接当作暗税回答。
+  - 修复提示明确要求暗税回答围绕“名义上不是税、实际像税”的负担展开。
+- 测试
+  - `PlannerServiceTest` 新增：暗税问题不会使用正式税种改写。
+  - `FinalAnswerServiceTest` 新增：把正式税种当暗税时必须重写。
+
+### 验证结果
+- 已执行局部回归：
+  ```bash
+  mvn test -Dtest=PlannerServiceTest,FinalAnswerServiceTest
+  ```
+- 结果：
+  ```text
+  Tests run: 15, Failures: 0, Errors: 0, Skipped: 0
+  ```
+
+### 设计决策说明
+
+#### 1. 本次实现做了哪些设计决策？
+- 将“暗税”作为税费负担问题中的一个独立语义分支，而不是继续复用“有哪些税”的回答模板。
+- 在 Planner 阶段先拆分查询意图，在 FinalAnswer 阶段再做输出质量保护。
+- 用专门规则拦截“正式税种冒充暗税”的答案。
+
+#### 2. 每个决策的可选方案有哪些？
+- 可以新增一个 `SubIntent.HIDDEN_TAX_EXAMPLE`，也可以先用 `CONCRETE_EXAMPLE + isHiddenTaxQuestion` 处理。
+- 可以只改 prompt，也可以同时改 Planner rewrite、RAG query 和质量检查。
+- 暗税例子可以完全依赖模型常识，也可以要求 RAG 命中后再回答。
+
+#### 3. 为什么选择当前方案？
+- 当前改动范围小，能快速纠正“税”和“暗税”混淆。
+- 只改 prompt 不够稳，Planner 仍可能把暗税检索成正式税种；所以需要从查询阶段拆开。
+- 阅读辅助场景允许常识补充，但必须把概念边界讲清楚。
+
+#### 4. 当前方案适合什么场景？
+- 用户围绕农民负担追问“暗税有哪些”“隐性负担有哪些”“变相收费是什么”。
+- 当前文本只讲“税、费、劳务、摊派”，用户需要进一步区分正式税和隐性负担。
+
+#### 5. 当前方案不适合什么场景？
+- 用户要求精确史料出处、具体年份或地方政策细节。
+- “暗税”在某本书中有特殊定义，需要严格按书中术语体系解释的场景。
+
+#### 6. 如果自己重写，最应该保留哪部分，最应该质疑哪部分？
+- 最应该保留：税和暗税必须分流，不能用同一个清单回答。
+- 最应该保留：FinalAnswer 需要显式说明“暗税不是正式税种”。
+- 最应该质疑：当前仍用关键词识别暗税，后续可以把这种概念区分抽象成通用术语辨析能力。
+
+## 2026-06-08：从“暗税特例”改为通用焦点术语边界
+
+### 改动概括
+- 撤掉上一版针对“暗税”的专用提示词和专用质量检查，避免以后每遇到一个例子就新增一条固定指示。
+- 改为通用识别：当用户问的是一个复合焦点术语，例如“暗税有哪些”，系统提取 `focusTerm=暗税`、`broaderTerm=税`，先处理二者边界，再回答焦点术语本身。
+
+### 新增内容
+- `PlannerService` 新增通用 `ConceptBoundary`：
+  - 从“有哪些/是什么/什么意思/怎么理解”等问题中提取焦点术语。
+  - 根据后缀母概念识别边界，例如 `X税 -> 税`、`X成本 -> 成本`、`X权力 -> 权力`。
+  - 生成通用 standalone question：先界定焦点术语和母概念的区别，再给焦点术语的表现或例子。
+- `FinalAnswerService` 新增通用概念边界检查：
+  - 如果答案没有说明焦点术语和母概念的区别，会触发重写。
+  - 修复提示要求不要退回母概念的一般清单。
+
+### 修改内容
+- `PlannerService`
+  - 删除 `isHiddenTaxQuestion` 特例分支。
+  - RAG 查询改为优先加入：
+    - `焦点术语 具体例子 表现`
+    - `焦点术语 与 母概念 区别`
+  - 边界查询前置，避免被查询数量上限截断。
+- `FinalAnswerService`
+  - 删除暗税专用 prompt。
+  - 删除暗税专用例子检查和“正式税种冒充暗税”的定制规则。
+  - 增加通用要求：更具体的焦点术语不能因为关键词重叠而回答成母概念的一般例子。
+- 测试
+  - `PlannerServiceTest` 改为验证复合术语边界改写，而不是验证暗税特例。
+  - `FinalAnswerServiceTest` 改为验证焦点术语退化成母概念时触发重写。
+
+### 验证结果
+- 已执行局部回归：
+  ```bash
+  mvn test -Dtest=PlannerServiceTest,FinalAnswerServiceTest
+  ```
+- 结果：
+  ```text
+  Tests run: 15, Failures: 0, Errors: 0, Skipped: 0
+  ```
+
+### 设计决策说明
+
+#### 1. 本次实现做了哪些设计决策？
+- 把“暗税”问题抽象为“复合焦点术语 vs 母概念”的通用问题。
+- 在 Planner 阶段提取术语边界，在 FinalAnswer 阶段检查答案是否尊重这个边界。
+- 保留少量母概念后缀表，而不是为每个具体术语写提示词。
+
+#### 2. 每个决策的可选方案有哪些？
+- 可以继续维护暗税、隐性成本、政治权力等专用规则，也可以抽象为通用术语边界。
+- 焦点术语可以由规则提取，也可以由模型规划输出结构化字段。
+- 质量检查可以只看 prompt，也可以在代码中检查焦点术语、母概念和边界表达。
+
+#### 3. 为什么选择当前方案？
+- 用户指出的问题本质是概念边界缺失，不是少了某条暗税提示。
+- 通用焦点术语机制能覆盖更多类似问题，避免提示词无穷膨胀。
+- 规则提取成本低、可测试，也符合当前 PlannerService 的规则规划风格。
+
+#### 4. 当前方案适合什么场景？
+- “暗税有哪些”“隐性成本是什么”“政治权力怎么理解”这类复合术语问题。
+- 用户追问一个更窄概念，但该概念包含一个更宽泛关键词的场景。
+
+#### 5. 当前方案不适合什么场景？
+- 焦点术语不在问题开头，或句式复杂到规则无法稳定提取。
+- 母概念不是后缀关系的术语，例如需要语义解析才能看出上下位关系。
+
+#### 6. 如果自己重写，最应该保留哪部分，最应该质疑哪部分？
+- 最应该保留：从具体例子抽象到“焦点术语边界”的方向。
+- 最应该保留：Planner 负责识别边界，FinalAnswer 负责遵守边界。
+- 最应该质疑：母概念后缀表仍是启发式，后续可以让 Planner 输出结构化 `focusTerm` 和 `broaderTerm`。
+
+## 2026-06-08：识别“既然有问题为什么还要做”的让步型为什么
+
+### 改动概括
+- 修复用户问“既然 A 会带来困难，为什么还要执行 B”时，系统被 A 的后果带跑、没有回答 B 的执行理由的问题。
+- 新增通用 `CONTRASTIVE_WHY` 子意图，专门处理“既然/虽然 A，但为什么仍然 B”的权衡型阅读追问。
+
+### 新增内容
+- `SubIntent`
+  - 新增 `CONTRASTIVE_WHY`。
+- `PlannerService`
+  - 新增让步型为什么识别：
+    - `既然 ... 为什么还要 ...`
+    - `既然 ... 为什么仍然/依然/还是 ...`
+  - 新增 `ContrastiveParts`，从问题中提取：
+    - `premise`：用户承认的负面后果或矛盾。
+    - `action`：用户真正追问“为什么仍然要做”的政策或行动。
+  - standalone question 改写为：在承认负面后果的前提下，解释为什么仍然选择该行动，重点讲更大问题、优先目标、权衡取舍和代价。
+- `FinalAnswerService`
+  - 增加 `CONTRASTIVE_WHY` prompt 规则。
+  - 增加质量检查：答案必须解释为什么仍然选择该政策或行动，必须承认代价，并且必须出现优先目标/权衡取舍层面的解释。
+
+### 修改内容
+- `PlannerService`
+  - `CONTRASTIVE_WHY` 使用 `CONTEXT_ANCHORED_MODEL_KNOWLEDGE` 和 `MEDIUM` 证据严格度。
+  - RAG 查询增加：
+    - `行动 背景 原因 目标`
+    - `行动 政策取舍 影响`
+    - `前提 + 行动 + 为什么仍然执行`
+- `FinalAnswerService`
+  - 如果答案主要复述困难、负担、后果，而没有解释政策目标和取舍，会触发重写。
+  - 修复提示要求：不要继续复述 A 的后果，要回答为什么仍然做 B。
+- 测试
+  - `PlannerServiceTest` 新增：分税制让步型为什么问题会改写为权衡型 standalone question。
+  - `FinalAnswerServiceTest` 新增：只复述后果、不讲权衡的回答必须重写。
+
+### 验证结果
+- 已执行局部回归：
+  ```bash
+  mvn test -Dtest=PlannerServiceTest,FinalAnswerServiceTest
+  ```
+- 结果：
+  ```text
+  Tests run: 17, Failures: 0, Errors: 0, Skipped: 0
+  ```
+
+### 设计决策说明
+
+#### 1. 本次实现做了哪些设计决策？
+- 把“问不达意”抽象为让步型为什么识别，而不是给“分税制”写专用提示。
+- Planner 负责提取 `premise/action`，FinalAnswer 负责保证答案聚焦 action 的执行理由。
+- 质量检查要求答案同时包含“承认代价”和“解释权衡”，避免只讲好处或只讲坏处。
+
+#### 2. 每个决策的可选方案有哪些？
+- 可以只加一条分税制 prompt，也可以新增通用 `CONTRASTIVE_WHY`。
+- `premise/action` 可以用规则提取，也可以交给模型 planner 输出结构化字段。
+- 质量检查可以仅靠 prompt，也可以用启发式规则检查是否出现权衡和代价。
+
+#### 3. 为什么选择当前方案？
+- 用户的问题不是分税制知识点本身，而是系统没识别“既然 A，为什么仍然 B”的问法结构。
+- 规则识别该句式稳定、成本低，能覆盖更多类似阅读追问。
+- 最终答案阶段加检查，可以防止模型又被证据中的负面后果带跑。
+
+#### 4. 当前方案适合什么场景？
+- “既然这个政策有副作用，为什么还要执行？”
+- “既然会造成困难，为什么当时仍然这么做？”
+- “既然有代价，为什么还要推进？”这类需要解释政策取舍的问题。
+
+#### 5. 当前方案不适合什么场景？
+- 用户只是单纯问某政策的后果，而不是问“为什么仍然执行”。
+- 问题句式复杂到规则无法准确抽取 premise/action，需要模型规划补足。
+
+#### 6. 如果自己重写，最应该保留哪部分，最应该质疑哪部分？
+- 最应该保留：把让步型为什么作为独立子意图。
+- 最应该保留：答案必须讲“更大问题、优先目标、权衡取舍、代价”。
+- 最应该质疑：`premise/action` 目前是字符串规则抽取，后续可以升级为 Planner 输出结构化字段。
+
+## 2026-06-08：输出最终发送给大模型的 Prompt 日志
+
+### 改动概括
+- 在 `FinalAnswerService` 中增加最终模型 Prompt 日志，方便排查回答不贴题、重复、质量检查重写等问题。
+- 日志会输出正常最终回答阶段和质量检查失败后的重写阶段 Prompt。
+
+### 新增内容
+- `FinalAnswerService`
+  - 新增 `Logger`。
+  - 新增 `logPrompt(stage, prompt)` 方法。
+  - Prompt 日志使用固定边界：
+    - `AI_MODEL_PROMPT_BEGIN`
+    - `AI_MODEL_PROMPT_END`
+  - 日志中包含：
+    - `stage`
+    - prompt 字符数
+    - 完整 prompt 内容
+
+### 修改内容
+- `FinalAnswerService.answer(...)`
+  - 在调用 `modelClient.chat(prompt)` 前输出 `stage=FINAL_ANSWER` 的完整 prompt。
+  - 当质量检查未通过并生成 repair prompt 时，在二次调用模型前输出 `stage=REPAIR_ANSWER` 的完整 prompt。
+
+### 验证结果
+- 已执行局部回归：
+  ```bash
+  mvn test -Dtest=FinalAnswerServiceTest
+  ```
+- 结果：
+  ```text
+  Tests run: 7, Failures: 0, Errors: 0, Skipped: 0
+  ```
+
+### 设计决策说明
+
+#### 1. 本次实现做了哪些设计决策？
+- 日志放在 `FinalAnswerService`，因为这里是最终 prompt 拼装和模型调用的唯一入口。
+- 正常回答和修复回答分别使用 `FINAL_ANSWER`、`REPAIR_ANSWER` 两个 stage，方便区分是哪一次模型调用。
+- 使用固定 begin/end 边界，方便从长日志中复制或检索完整 prompt。
+
+#### 2. 每个决策的可选方案有哪些？
+- 可以只打印 prompt 摘要，也可以打印完整 prompt。
+- 可以在 `ModelClient` 统一打印所有模型请求，也可以只在 `FinalAnswerService` 打印最终回答 prompt。
+- 可以使用 `DEBUG` 级别，也可以使用 `INFO` 级别。
+
+#### 3. 为什么选择当前方案？
+- 用户当前要排查的是最终回答为什么问不达意，最关键的是最终回答阶段实际输送给模型的完整 prompt。
+- 质量检查重写也会再次调用模型，如果不打印 repair prompt，很难判断二次生成是否被正确约束。
+- 当前项目日志配置允许业务包输出，`INFO` 级别更容易在控制台和 `server.log` 中直接看到。
+
+#### 4. 当前方案适合什么场景？
+- 排查最终回答重复上一轮内容。
+- 排查 Planner 输出、Evidence 汇总、AnswerRequirement 是否真正进入最终 prompt。
+- 排查质量检查触发后，repair prompt 是否表达了正确的重写原因。
+
+#### 5. 当前方案不适合什么场景？
+- 生产环境长期高流量运行时，完整 prompt 日志会比较大，也可能包含用户阅读内容和对话内容。
+- 如果后续需要更严格的隐私控制，应增加配置开关或脱敏策略。
+
+#### 6. 如果自己重写，最应该保留哪部分，最应该质疑哪部分？
+- 最应该保留：在模型调用前输出最终完整 prompt，而不是只输出 Planner 或 Evidence 的中间状态。
+- 最应该保留：`FINAL_ANSWER` 和 `REPAIR_ANSWER` 的 stage 区分。
+- 最应该质疑：默认使用 `INFO` 级别是否适合长期运行，后续可以改为配置开关控制。
+
+## 2026-06-09：PlannerService 改为 LLM 决策型规划器
+
+### 改动概括
+- 将 `PlannerService` 从关键词规则路由改为 LLM 决策型 Planner。
+- 新流程为：`PlannerPromptBuilder -> ModelClient -> LlmPlanResponse(JSON) -> PlanValidator -> ChatPlan`。
+- 后端不直接信任模型输出；模型调用失败、JSON 解析失败或校验失败时统一回退到安全阅读兜底计划。
+
+### 新增内容
+- 新增 `PlannerPromptBuilder`
+  - 构造 Planner prompt。
+  - prompt 中包含启用工具白名单、参数说明、JSON schema 和规划规则。
+  - 明确要求模型只能输出纯 JSON，不能输出 Markdown、代码块或解释文字。
+- 新增 `ToolRegistry` 和 `AvailableTool`
+  - 维护工具白名单。
+  - 第一版只启用内部只读工具：
+    - `context.get_recent_dialogue`
+    - `context.get_current_page`
+    - `memory.search`
+    - `rag.search`
+  - `note.search`、`reading_progress.query`、`learning_plan.save` 仅预留，默认不暴露、不执行。
+- 新增 `LlmPlanResponse`、`LlmToolStep`、`LlmAnswerRequirement`
+  - 承接模型输出 JSON。
+  - `LlmAnswerRequirement` 使用 `Boolean` 字段，便于识别缺字段。
+- 新增 `PlanValidator` 和 `PlanValidationException`
+  - 校验枚举、白名单、执行模式、maxSteps、toolPlan 和写操作约束。
+
+### 修改内容
+- `PlannerService`
+  - 注入 `ModelClient`、`ObjectMapper`、`PlannerPromptBuilder`、`PlanValidator`。
+  - 删除旧主路径中的关键词路由逻辑。
+  - 不再根据 `externalMcpCalls` 生成计划，字段仍保留以兼容 API。
+  - 新增 Planner prompt 日志，使用 `AI_MODEL_PROMPT_BEGIN/END stage=PLANNER` 包裹。
+  - 新增 `fallbackReadingPlan`：
+    - 默认调用 `context.get_recent_dialogue`。
+    - 有划词或划词上下文时调用 `context.get_current_page`。
+    - `enableMemory=true/null` 时调用 `memory.search`。
+    - `enableRag=true/null` 时调用 `rag.search`。
+- `PlannerTaskType`
+  - 补充指导文件要求的枚举：
+    - `GENERAL_QA`
+    - `NOTE_QA`
+    - `READING_PLAN`
+    - `TOOL_ACTION`
+  - 保留旧枚举，降低对其他类的编译冲击。
+- 测试
+  - `PlannerServiceTest` 改为 mock `ModelClient` 输出 JSON。
+  - 新增 `PlanValidatorTest`。
+  - 新增 `PlannerPromptBuilderTest`。
+
+### JSON schema
+- Planner JSON 必须包含：
+  - `taskType`
+  - `subIntent`
+  - `standaloneQuestion`
+  - `dependsOnContext`
+  - `executionMode`
+  - `allowedTools`
+  - `toolPlan`
+  - `taskGoal`
+  - `maxSteps`
+  - `stopCondition`
+  - `answerGuidance`
+  - `answerMode`
+  - `evidenceStrictness`
+  - `answerRequirement`
+  - `planningReason`
+- 相比指导文件，额外保留现有回答质量控制字段：
+  - `subIntent`
+  - `answerMode`
+  - `evidenceStrictness`
+  - `answerRequirement`
+
+### fallback 触发条件
+- 模型调用异常。
+- 模型输出为空。
+- 模型输出不是纯 JSON。
+- JSON 解析失败。
+- 字段缺失。
+- 枚举非法。
+- 工具不在启用白名单中。
+- `toolPlan.toolName` 不属于 `allowedTools`。
+- `maxSteps` 小于 0 或大于 5。
+- `NO_TOOL/SINGLE_TOOL/MULTI_TOOL` 与 `toolPlan` 数量不匹配。
+- 模型输出外部 MCP 工具。
+- 模型输出写操作或需要确认的工具。
+- 模型输出 `BOUNDED_REACT`。
+
+### 验证结果
+- 已执行局部回归：
+  ```bash
+  mvn test -Dtest=PlannerServiceTest,PlanValidatorTest,PlannerPromptBuilderTest
+  ```
+- 结果：
+  ```text
+  Tests run: 19, Failures: 0, Errors: 0, Skipped: 0
+  ```
+
+### 设计决策说明
+
+#### 1. 本次实现做了哪些设计决策？
+- 让 LLM Planner 负责语义判断和工具计划生成，后端只做结构、安全和兼容性校验。
+- ToolRegistry 第一版只暴露当前已经可执行的内部只读工具。
+- 保留并扩展输出 `subIntent/answerMode/evidenceStrictness/answerRequirement`，避免 FinalAnswerService 的答案质量控制退化。
+- fallbackReadingPlan 保守偏阅读问答，保证模型规划失败时仍能继续回答。
+
+#### 2. 每个决策的可选方案有哪些？
+- 可以完全按指导文件最小 schema 输出，也可以扩展当前项目已有回答质量字段。
+- 可以让 ToolRegistry 暴露未来工具，也可以只暴露已经可执行工具。
+- 可以在 PlannerService 内直接写 prompt，也可以拆出 PlannerPromptBuilder。
+- 可以允许 BOUNDED_REACT，也可以第一版全部拒绝。
+
+#### 3. 为什么选择当前方案？
+- 用户明确希望模型负责语义判断，但不希望模型绕过后端安全边界。
+- 当前系统已经依赖 `subIntent` 等字段控制举例、故事、让步型为什么和避免重复，去掉会造成回答质量回退。
+- 只暴露已可执行工具可以避免模型规划出后端无法执行的工具。
+- 第一版拒绝 BOUNDED_REACT，能保持计划执行稳定，后续再单独开放探索型任务。
+
+#### 4. 当前方案适合什么场景？
+- 阅读问答、记忆辅助、RAG 检索、当前页面/划词上下文补充。
+- 需要让模型根据自然语言判断是否需要工具的场景。
+- 需要后端强校验工具白名单和执行模式的场景。
+
+#### 5. 当前方案不适合什么场景？
+- 当前还不适合 GitHub、文件系统、代码仓库探索类任务，因为外部 MCP 默认不开放。
+- 当前还不适合保存计划或写操作工具，因为写操作需要单独确认流程。
+- 当前还不适合依赖未实现的 note/search 或 reading progress 工具。
+
+#### 6. 如果自己重写，最应该保留哪部分，最应该质疑哪部分？
+- 最应该保留：LLM 做语义规划、后端做白名单校验和 fallback。
+- 最应该保留：ToolRegistry 只向 prompt 暴露真正可执行的工具。
+- 最应该质疑：Planner prompt 目前较长，后续可以压缩 schema 或增加更强的 few-shot 示例。
+
+## 2026-06-09：修正 LLM Planner 外部工具不可用时的工具选择
+
+### 改动概括
+- 修复用户请求 GitHub/外部搜索时，Planner 错误规划 `memory.search` 和 `rag.search` 凑数的问题。
+- 当当前 ToolRegistry 没有 GitHub/外部搜索工具时，Planner 会返回 `NO_TOOL + EXTERNAL_SEARCH_REQUIRED`，最终回答必须说明没有实际执行外部搜索。
+
+### 新增内容
+- 新增 `PlannerIntentClassifier`
+  - 识别 GitHub、网页、外部搜索、实时信息、最新信息等外部工具需求。
+  - 识别阅读相关问题，用于限制 `rag.search` 的适用范围。
+- `PlannerService`
+  - 新增 `unsupportedExternalToolPlan`。
+  - 当模型计划失败且问题需要外部工具时，不再进入 `fallbackReadingPlan`，而是进入 unsupported plan。
+- `PlanValidator`
+  - 新增意图一致性校验：
+    - 外部/实时请求不能用 `rag.search`、`memory.search`、`context.get_current_page` 替代。
+    - 需要实时外部事实时不能使用 `TEXT_ONLY`。
+    - 非阅读问题不能规划 `rag.search`。
+    - `dependsOnContext=false` 时不能规划 context 工具。
+- `FinalAnswerService`
+  - 新增外部搜索回答质量检查：
+    - `answerMode=EXTERNAL_SEARCH_REQUIRED` 且没有 `externalMcpRefs` 时，必须说明没有实际执行外部搜索。
+    - 只有 memoryRefs 时，不能把历史记忆说成本次 GitHub 或实时搜索结果。
+
+### 修改内容
+- `PlannerPromptBuilder`
+  - 增加工具适用边界：
+    - `rag.search` 仅用于书籍/章节/划词/作者观点/原文证据相关问题。
+    - `memory.search` 仅用于用户明确要求结合历史记忆、历史偏好、之前问过的内容，或问题明显需要历史上下文。
+    - `context.get_current_page` 仅用于当前页面、划词、“这里/这句话/上文”等阅读上下文问题。
+    - GitHub/网页/外部搜索/实时信息没有对应工具时，不能改用 RAG 或 Memory 凑数。
+- `ChatPlan`
+  - `maxSteps` 允许为 0，以正确表达 `NO_TOOL` 计划。
+- 测试
+  - `PlannerServiceTest` 增加：“使用github搜索httpreading的项目”在没有 GitHub 工具时返回 `NO_TOOL + EXTERNAL_SEARCH_REQUIRED`。
+  - `PlanValidatorTest` 增加外部请求不能用 RAG/Memory 替代、实时外部事实不能 `TEXT_ONLY`、`dependsOnContext=false` 不允许 context 工具等测试。
+  - `PlannerPromptBuilderTest` 增加工具边界规则断言。
+  - `FinalAnswerServiceTest` 增加没有外部证据时不能伪称 GitHub 搜索结果的重写测试。
+
+### 验证结果
+- 已执行局部回归：
+  ```bash
+  mvn test -Dtest=PlannerServiceTest,PlanValidatorTest,PlannerPromptBuilderTest,FinalAnswerServiceTest
+  ```
+- 结果：
+  ```text
+  Tests run: 32, Failures: 0, Errors: 0, Skipped: 0
+  ```
+
+### 设计决策说明
+
+#### 1. 本次实现做了哪些设计决策？
+- 把 GitHub/外部搜索/实时信息识别抽成 `PlannerIntentClassifier`，避免在多个类里散落关键词判断。
+- 外部工具不可用时使用 `unsupportedExternalToolPlan`，而不是阅读兜底计划。
+- Validator 不只校验字段合法，还校验“工具和用户意图是否一致”。
+- FinalAnswerService 再加一层回答侧保护，防止把记忆或模型常识伪装成实时搜索。
+
+#### 2. 每个决策的可选方案有哪些？
+- 可以只在 prompt 中提醒模型，也可以在 Validator 中硬性拦截。
+- 可以让外部工具问题也进入 fallbackReadingPlan，也可以单独 unsupported plan。
+- 可以直接开放 GitHub 工具，也可以在 ToolRegistry 没有真实适配器前明确拒绝实时搜索。
+
+#### 3. 为什么选择当前方案？
+- 只靠 prompt 不够稳定，模型仍可能把 GitHub 搜索错规划成 RAG/Memory。
+- fallbackReadingPlan 是阅读问答兜底，不适合外部实时搜索请求。
+- 当前 ToolRegistry 没有 GitHub 工具，诚实说明不可用比伪造搜索结果更安全。
+
+#### 4. 当前方案适合什么场景？
+- 用户请求 GitHub 搜索、网页搜索、联网搜索、最新信息，而系统当前没有对应工具。
+- 模型错误规划阅读工具替代外部工具，需要后端拦截。
+- 最终回答需要区分“历史记忆”和“本次实时搜索结果”。
+
+#### 5. 当前方案不适合什么场景？
+- 后续真正接入 GitHub MCP 工具后，需要把对应工具加入 ToolRegistry，并调整 Validator 允许 GitHub 工具。
+- 用户只是问一般代码概念，不要求 GitHub 或实时搜索时，不应触发 unsupported plan。
+
+#### 6. 如果自己重写，最应该保留哪部分，最应该质疑哪部分？
+- 最应该保留：外部工具不可用时必须 NO_TOOL，不允许 RAG/Memory 冒充。
+- 最应该保留：Validator 的意图一致性校验。
+- 最应该质疑：外部工具需求识别目前仍是启发式，后续可以随 ToolRegistry 能力扩展成更结构化的工具需求分类。
+
+## 2026-06-09：LLM Planner 改为 MCP Server 级白名单选择
+
+### 改动概括
+- 修正 Planner 只看到本地 `context/memory/rag` 工具的问题。
+- Planner prompt 现在同时展示本地工具白名单和外部 MCP server 白名单。
+- 一级 Planner 对外部 MCP 不再选择具体工具，只选择 `mcp.server:<serverName>`。
+- 具体工具调用交给该 server 对应的 ReAct agent，agent 只拿到该 server 允许的工具列表。
+
+### 新增内容
+- `PlannerPromptBuilder`
+  - 注入 `ExternalMcpClientService`。
+  - 当 `enableExternalMcp=true` 时，读取 `routableServers()` 并输出 server 名称、描述和允许工具名。
+  - 新增外部 MCP server 规划示例：`executionMode=BOUNDED_REACT`、`allowedTools=["mcp.server:github"]`、`toolPlan=[]`。
+- `PlanValidator`
+  - 注入 `ExternalMcpClientService`。
+  - 新增 `mcp.server:` token 校验。
+  - `BOUNDED_REACT` 模式要求 `allowedTools` 中只能有一个已启用 MCP server，且 `toolPlan` 必须为空。
+- `ExternalMcpAgentService`
+  - 新增带 `routedServerName` 的 `execute(...)` 重载。
+  - 当 Planner 已选择 server 时，跳过原来的 server router，直接进入该 server 的 ReAct 工具规划与调用。
+- `McpToolOrchestrator`
+  - 从 `ChatPlan.allowedTools` 中识别 `mcp.server:<serverName>`。
+  - 如果存在 server token，则调用新的 `ExternalMcpAgentService.execute(request, planningContext, serverName)`。
+
+### 修改内容
+- `PlannerService`
+  - fallback 逻辑保留阅读兜底，但外部 MCP 请求在模型规划失败且存在可用 server 时，会回退到 MCP server router。
+  - 外部 MCP 不可用时仍返回 `unsupportedExternalToolPlan`，不使用 RAG/Memory 冒充外部搜索。
+- `PlannerPromptBuilder`
+  - 明确规则：GitHub、网页、外部搜索、实时信息先看 MCP server 白名单。
+  - 如果有匹配 server，只输出 server token，不输出具体 `external.*` 工具名。
+  - 如果没有匹配 server，输出 `NO_TOOL + EXTERNAL_SEARCH_REQUIRED`。
+- 测试
+  - `PlannerPromptBuilderTest` 覆盖 prompt 中的 MCP server 白名单展示。
+  - `PlanValidatorTest` 覆盖启用 server token 可通过、无 server token 的 `BOUNDED_REACT` 会被拒绝。
+  - `PlannerServiceTest` 覆盖 GitHub server 可用时输出 `BOUNDED_REACT + mcp.server:github`。
+  - `McpToolOrchestratorTest` 覆盖带 server token 时委托到指定 server 的 agent。
+  - `ExternalMcpAgentServiceTest` 覆盖预选 server 时跳过 router，并只读取该 server 的 allowed tools。
+
+### 验证结果
+- 已执行局部回归：
+  ```bash
+  mvn test -Dtest=PlannerServiceTest,PlanValidatorTest,PlannerPromptBuilderTest,McpToolOrchestratorTest,ExternalMcpAgentServiceTest
+  ```
+- 结果：
+  ```text
+  Tests run: 46, Failures: 0, Errors: 0, Skipped: 0
+  ```
+
+### 设计决策说明
+
+#### 1. 本次实现做了哪些设计决策？
+- 一级 Planner 只负责判断“是否需要哪个 MCP server”，不直接规划外部 MCP 具体工具。
+- 外部 MCP server 用 `mcp.server:<serverName>` 作为受控白名单 token。
+- server 内部工具调用仍交给已有 ReAct agent，由它在该 server 的 allowed tools 范围内逐步调用。
+- 本地阅读工具仍保留 `context/memory/rag` 的确定性规划。
+
+#### 2. 每个决策的可选方案有哪些？
+- 可以把所有外部 MCP 工具直接暴露给 Planner，也可以只暴露 server 级能力。
+- 可以让 Planner 输出 `external.github.search_code` 这类具体工具，也可以输出 `mcp.server:github`。
+- 可以完全依赖原来的 server router，也可以让 Planner 先选 server，再让 agent 执行。
+
+#### 3. 为什么选择当前方案？
+- 用户明确希望 Planner 根据 MCP server 名称和描述判断是否调用，而不是只看本地工具。
+- server 级白名单能减少 Planner 的工具选择噪声，也避免把外部具体工具泄漏到一级计划。
+- ReAct agent 本来就适合在单个 MCP server 的工具集合内做多步探索。
+
+#### 4. 当前方案适合什么场景？
+- GitHub、网页、仓库、外部搜索等需要先选择外部能力域，再由专属 agent 多步探索的任务。
+- 多个 MCP server 并存，需要让 Planner 在 server 级别做路由的任务。
+- 需要保留本地阅读链路稳定性，同时开放外部探索能力的任务。
+
+#### 5. 当前方案不适合什么场景？
+- 单个外部工具调用非常确定、无需 ReAct 的场景，后续可以增加 `MCP_SINGLE_TOOL` 类模式优化。
+- MCP server 描述不清晰时，Planner 仍可能选错 server，需要配置层补充更好的描述。
+- 如果某个 server 的 allowed tools 过宽，风险仍需要在 ReAct agent 的 schema、去重、确认和写操作拦截中控制。
+
+#### 6. 如果自己重写，最应该保留哪部分，最应该质疑哪部分？
+- 最应该保留：一级 Planner 只选 server，二级 agent 才看具体工具。
+- 最应该保留：`mcp.server:<serverName>` token 必须经后端白名单校验。
+- 最应该质疑：当 Planner 失败时是否应优先进入旧 router，还是直接 unsupported；当前实现对存在可用 server 的外部请求保留 router 兜底。

@@ -2,27 +2,51 @@ package com.example.httpreading.service.ai;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+import java.util.List;
+import java.util.Map;
 
 import com.example.httpreading.dto.AiChatRequest;
+import com.example.httpreading.mcp.ExternalMcpClientService;
+import com.example.httpreading.service.ModelClient;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class PlannerServiceTest {
-    private final PlannerService plannerService = new PlannerService();
+    private ModelClient modelClient;
+    private ExternalMcpClientService externalMcpClientService;
+    private PlannerService plannerService;
 
-    @Test
-    void readingQuestionUsesDeterministicMultiTool() {
-        AiChatRequest request = request("解释一下这一段");
-        request.setSelectedText("这一段");
-
-        ChatPlan plan = plannerService.plan(request);
-
-        assertEquals(ToolExecutionMode.MULTI_TOOL, plan.executionMode());
-        assertTrue(plan.toolPlan().stream().anyMatch(step -> "rag.search".equals(step.toolName())));
-        assertTrue(plan.toolPlan().stream().anyMatch(step -> "context.get_current_page".equals(step.toolName())));
+    @BeforeEach
+    void setUp() {
+        ToolRegistry toolRegistry = new ToolRegistry();
+        modelClient = mock(ModelClient.class);
+        externalMcpClientService = mock(ExternalMcpClientService.class);
+        when(externalMcpClientService.routableServers()).thenReturn(List.of());
+        plannerService = new PlannerService(
+            modelClient,
+            new ObjectMapper(),
+            new PlannerPromptBuilder(toolRegistry, externalMcpClientService),
+            new PlanValidator(toolRegistry, externalMcpClientService),
+            externalMcpClientService);
     }
 
     @Test
-    void smallTalkUsesNoTool() {
+    void smallTalkUsesNoToolFromLlmPlan() {
+        when(modelClient.chat(anyString())).thenReturn(planJson(
+            "SMALL_TALK",
+            "NONE",
+            "你好",
+            false,
+            "NO_TOOL",
+            "[]",
+            "[]",
+            0));
+
         ChatPlan plan = plannerService.plan(request("你好"));
 
         assertEquals(ToolExecutionMode.NO_TOOL, plan.executionMode());
@@ -30,19 +54,264 @@ class PlannerServiceTest {
     }
 
     @Test
-    void githubAnalysisUsesBoundedReact() {
-        ChatPlan plan = plannerService.plan(request("帮我分析 GitHub 仓库的 README"));
+    void selectedTextQuestionCanUseCurrentPageTool() {
+        when(modelClient.chat(anyString())).thenReturn(planJson(
+            "READING_QA",
+            "NONE",
+            "解释划词内容是什么意思",
+            true,
+            "SINGLE_TOOL",
+            "[\"context.get_current_page\"]",
+            "[{\"toolName\":\"context.get_current_page\",\"arguments\":{\"bookId\":1,\"chapterIndex\":1,\"chapterTitle\":\"\",\"selectedText\":\"差序格局\",\"selectedContext\":\"上下文\"},\"reason\":\"需要当前划词上下文\"}]",
+            1));
+        AiChatRequest request = request("这里是什么意思？");
+        request.setSelectedText("差序格局");
+        request.setSelectedContext("上下文");
 
-        assertEquals(ToolExecutionMode.BOUNDED_REACT, plan.executionMode());
-        assertTrue(plan.allowedTools().stream().allMatch(tool -> tool.startsWith("github.")));
+        ChatPlan plan = plannerService.plan(request);
+
+        assertEquals(ToolExecutionMode.SINGLE_TOOL, plan.executionMode());
+        assertTrue(plan.toolPlan().stream().anyMatch(step -> "context.get_current_page".equals(step.toolName())));
     }
 
     @Test
-    void ragMemoryContextDoNotDefaultToReact() {
-        ChatPlan plan = plannerService.plan(request("根据当前章节和我的记忆回答"));
+    void bookEvidenceQuestionCanUseRagSearch() {
+        when(modelClient.chat(anyString())).thenReturn(planJson(
+            "READING_QA",
+            "NONE",
+            "书里是怎么解释差序格局的？",
+            true,
+            "SINGLE_TOOL",
+            "[\"rag.search\"]",
+            "[{\"toolName\":\"rag.search\",\"arguments\":{\"bookId\":1,\"chapterIndex\":1,\"query\":\"差序格局是什么意思\",\"topK\":5},\"reason\":\"检索书籍证据\"}]",
+            1));
 
-        assertTrue(plan.executionMode() == ToolExecutionMode.SINGLE_TOOL
-            || plan.executionMode() == ToolExecutionMode.MULTI_TOOL);
+        ChatPlan plan = plannerService.plan(request("书里是怎么解释差序格局的？"));
+
+        assertTrue(plan.toolPlan().stream().anyMatch(step -> "rag.search".equals(step.toolName())));
+    }
+
+    @Test
+    void memoryQuestionCanUseMemorySearch() {
+        when(modelClient.chat(anyString())).thenReturn(planJson(
+            "MEMORY_QA",
+            "NONE",
+            "结合用户之前的理解解释当前问题",
+            true,
+            "SINGLE_TOOL",
+            "[\"memory.search\"]",
+            "[{\"toolName\":\"memory.search\",\"arguments\":{\"userId\":\"default_user\",\"sessionId\":\"book_1_chapter_1\",\"query\":\"之前的理解\",\"limit\":5},\"reason\":\"检索相关记忆\"}]",
+            1));
+
+        ChatPlan plan = plannerService.plan(request("结合我之前的理解说一下。"));
+
+        assertTrue(plan.toolPlan().stream().anyMatch(step -> "memory.search".equals(step.toolName())));
+    }
+
+    @Test
+    void multiToolQuestionCanUseMemoryAndRag() {
+        when(modelClient.chat(anyString())).thenReturn(planJson(
+            "READING_QA",
+            "NONE",
+            "结合用户之前的问题和书里内容解释当前问题",
+            true,
+            "MULTI_TOOL",
+            "[\"memory.search\",\"rag.search\"]",
+            "[{\"toolName\":\"memory.search\",\"arguments\":{\"userId\":\"default_user\",\"sessionId\":\"book_1_chapter_1\",\"query\":\"之前的问题\",\"limit\":5},\"reason\":\"检索记忆\"},{\"toolName\":\"rag.search\",\"arguments\":{\"bookId\":1,\"chapterIndex\":1,\"query\":\"书里的内容\",\"topK\":5},\"reason\":\"检索书籍证据\"}]",
+            2));
+
+        ChatPlan plan = plannerService.plan(request("结合我之前的问题和书里的内容解释一下。"));
+
+        assertEquals(ToolExecutionMode.MULTI_TOOL, plan.executionMode());
+        assertTrue(plan.toolPlan().stream().anyMatch(step -> "memory.search".equals(step.toolName())));
+        assertTrue(plan.toolPlan().stream().anyMatch(step -> "rag.search".equals(step.toolName())));
+    }
+
+    @Test
+    void illegalToolFallsBackToReadingPlan() {
+        when(modelClient.chat(anyString())).thenReturn(planJson(
+            "READING_QA",
+            "NONE",
+            "危险工具测试",
+            true,
+            "SINGLE_TOOL",
+            "[\"system.delete_all\"]",
+            "[{\"toolName\":\"system.delete_all\",\"arguments\":{},\"reason\":\"错误工具\"}]",
+            1));
+
+        ChatPlan plan = plannerService.plan(request("解释一下"));
+
+        assertFallback(plan);
+    }
+
+    @Test
+    void externalMcpToolFallsBackWhenNotEnabled() {
+        when(modelClient.chat(anyString())).thenReturn(planJson(
+            "READING_QA",
+            "NONE",
+            "外部工具测试",
+            true,
+            "SINGLE_TOOL",
+            "[\"external.github.search_code\"]",
+            "[{\"toolName\":\"external.github.search_code\",\"arguments\":{},\"reason\":\"外部工具\"}]",
+            1));
+
+        ChatPlan plan = plannerService.plan(request("分析代码"));
+
+        assertFallback(plan);
+    }
+
+    @Test
+    void noToolWithToolPlanFallsBack() {
+        when(modelClient.chat(anyString())).thenReturn(planJson(
+            "READING_QA",
+            "NONE",
+            "模式冲突",
+            true,
+            "NO_TOOL",
+            "[\"rag.search\"]",
+            "[{\"toolName\":\"rag.search\",\"arguments\":{\"bookId\":1,\"chapterIndex\":1,\"query\":\"q\",\"topK\":5},\"reason\":\"冲突\"}]",
+            1));
+
+        ChatPlan plan = plannerService.plan(request("解释一下"));
+
+        assertFallback(plan);
+    }
+
+    @Test
+    void maxStepsOverLimitFallsBack() {
+        when(modelClient.chat(anyString())).thenReturn(planJson(
+            "READING_QA",
+            "NONE",
+            "步数过大",
+            true,
+            "SINGLE_TOOL",
+            "[\"rag.search\"]",
+            "[{\"toolName\":\"rag.search\",\"arguments\":{\"bookId\":1,\"chapterIndex\":1,\"query\":\"q\",\"topK\":5},\"reason\":\"检索\"}]",
+            6));
+
+        ChatPlan plan = plannerService.plan(request("解释一下"));
+
+        assertFallback(plan);
+    }
+
+    @Test
+    void invalidJsonFallsBack() {
+        when(modelClient.chat(anyString())).thenReturn("不是 JSON");
+
+        ChatPlan plan = plannerService.plan(request("解释一下"));
+
+        assertFallback(plan);
+    }
+
+    @Test
+    void githubSearchWithoutGithubToolUsesUnsupportedExternalPlan() {
+        when(modelClient.chat(anyString())).thenReturn(planJson(
+            "READING_QA",
+            "NONE",
+            "使用 GitHub 搜索 httpreading 的项目",
+            true,
+            "MULTI_TOOL",
+            "[\"memory.search\",\"rag.search\"]",
+            "[{\"toolName\":\"memory.search\",\"arguments\":{\"userId\":\"default_user\",\"sessionId\":\"book_1_chapter_1\",\"query\":\"httpreading github\",\"limit\":5},\"reason\":\"错误地用记忆替代 GitHub 搜索\"},{\"toolName\":\"rag.search\",\"arguments\":{\"bookId\":1,\"chapterIndex\":1,\"query\":\"httpreading github\",\"topK\":5},\"reason\":\"错误地用 RAG 替代 GitHub 搜索\"}]",
+            2));
+
+        ChatPlan plan = plannerService.plan(request("使用github搜索httpreading的项目"));
+
+        assertEquals(ToolExecutionMode.NO_TOOL, plan.executionMode());
+        assertEquals(AnswerMode.EXTERNAL_SEARCH_REQUIRED, plan.answerMode());
+        assertEquals(EvidenceStrictness.STRICT, plan.evidenceStrictness());
+        assertTrue(plan.toolPlan().isEmpty());
+        assertTrue(plan.allowedTools().isEmpty());
+        assertTrue(plan.answerGuidance().contains("没有可用的 GitHub/外部搜索工具"));
+    }
+
+    @Test
+    void githubSearchWithGithubServerUsesBoundedReactServerPlan() {
+        when(externalMcpClientService.routableServers()).thenReturn(List.of(Map.of(
+            "name", "github",
+            "description", "GitHub 仓库资料",
+            "allowedTools", List.of("search_repositories", "get_file_contents"))));
+        when(modelClient.chat(anyString())).thenReturn(planJson(
+            "TOOL_ACTION",
+            "NONE",
+            "使用 GitHub 搜索 httpreading 的项目",
+            true,
+            "BOUNDED_REACT",
+            "[\"mcp.server:github\"]",
+            "[]",
+            5,
+            "EXTERNAL_SEARCH_REQUIRED"));
+        AiChatRequest request = request("使用github搜索httpreading的项目");
+        request.setEnableExternalMcp(true);
+
+        ChatPlan plan = plannerService.plan(request);
+
+        assertEquals(ToolExecutionMode.BOUNDED_REACT, plan.executionMode());
+        assertEquals(List.of("mcp.server:github"), plan.allowedTools());
+        assertTrue(plan.toolPlan().isEmpty());
+    }
+
+    private void assertFallback(ChatPlan plan) {
+        assertEquals(PlannerTaskType.READING_QA, plan.taskType());
+        assertTrue(plan.planningReason().contains("fallback") || plan.planningReason().contains("兜底"));
+        assertTrue(plan.toolPlan().stream().anyMatch(step -> "context.get_recent_dialogue".equals(step.toolName())));
+        assertTrue(plan.toolPlan().stream().anyMatch(step -> "memory.search".equals(step.toolName())));
+        assertTrue(plan.toolPlan().stream().anyMatch(step -> "rag.search".equals(step.toolName())));
+    }
+
+    private String planJson(String taskType,
+                            String subIntent,
+                            String standaloneQuestion,
+                            boolean dependsOnContext,
+                            String executionMode,
+                            String allowedTools,
+                            String toolPlan,
+                            int maxSteps) {
+        return """
+            {
+              "taskType": "%s",
+              "subIntent": "%s",
+              "standaloneQuestion": "%s",
+              "dependsOnContext": %s,
+              "executionMode": "%s",
+              "allowedTools": %s,
+              "toolPlan": %s,
+              "taskGoal": "完成回答规划",
+              "maxSteps": %d,
+              "stopCondition": "完成 toolPlan 后停止",
+              "answerGuidance": "依据证据回答，不要模板化。",
+              "answerMode": "TEXT_ONLY",
+              "evidenceStrictness": "STRICT",
+              "answerRequirement": {
+                "requiresConcreteExample": false,
+                "requiresSpecificEntity": false,
+                "requiresStorytelling": false,
+                "requiresDetailedProcess": false,
+                "avoidConceptualOpening": false,
+                "avoidRepeatingPreviousExplanation": false,
+                "allowModelKnowledge": false,
+                "mustDistinguishTextEvidenceAndSupplement": false,
+                "avoidRepeatingSourcePhrases": false,
+                "minDetailLevel": "MEDIUM"
+              },
+              "planningReason": "模型规划"
+            }
+            """.formatted(taskType, subIntent, standaloneQuestion, dependsOnContext, executionMode,
+            allowedTools, toolPlan, maxSteps);
+    }
+
+    private String planJson(String taskType,
+                            String subIntent,
+                            String standaloneQuestion,
+                            boolean dependsOnContext,
+                            String executionMode,
+                            String allowedTools,
+                            String toolPlan,
+                            int maxSteps,
+                            String answerMode) {
+        return planJson(taskType, subIntent, standaloneQuestion, dependsOnContext, executionMode, allowedTools,
+            toolPlan, maxSteps).replace("\"answerMode\": \"TEXT_ONLY\"", "\"answerMode\": \"" + answerMode + "\"");
     }
 
     private AiChatRequest request(String question) {

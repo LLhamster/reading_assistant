@@ -85,6 +85,22 @@ class ExternalMcpAgentServiceTest {
     }
 
     @Test
+    void preselectedServerSkipsRouterAndUsesThatServerTools() {
+        when(clientService.allowedToolDescriptors("github")).thenReturn(List.of(
+            descriptor("search_repositories", List.of("query"))));
+        when(plannerService.decide(any(), anyString(), anyList(), anyList(), anyInt(), anyInt()))
+            .thenReturn(new ExternalMcpAgentDecision("complete", "已完成", "", null, ""));
+
+        ExternalMcpAgentResult result = agentService.execute(request(), "planning", "github");
+
+        assertEquals("completed", result.getStatus());
+        assertTrue(result.getRefs().stream().anyMatch(ref -> ref.contains("MCP_ROUTE github: selected by Planner")));
+        verify(routerService, never()).route(any(), anyString(), anyList());
+        verify(clientService).allowedToolDescriptors("github");
+    }
+
+
+    @Test
     void dynamicallyRecoversFromFailedReadBySearchingThenReadingResolvedRepository() {
         ExternalMcpCall failedRead = call("get_file_contents",
             Map.of("owner", "LLhamster", "repo", "mask-dann", "path", "README.md"));

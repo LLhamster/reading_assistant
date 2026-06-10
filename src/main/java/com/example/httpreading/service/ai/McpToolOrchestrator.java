@@ -34,7 +34,10 @@ public class McpToolOrchestrator {
             if (!request.isExternalMcpEnabled()) {
                 return ToolExecutionResult.completed(List.of(), planRefs(plan, "BOUNDED_REACT_SKIPPED external MCP disabled"));
             }
-            ExternalMcpAgentResult agentResult = externalMcpAgentService.execute(request, planningContext(plan));
+            String selectedServerName = selectedMcpServerName(plan);
+            ExternalMcpAgentResult agentResult = selectedServerName.isBlank()
+                ? externalMcpAgentService.execute(request, planningContext(plan))
+                : externalMcpAgentService.execute(request, planningContext(plan), selectedServerName);
             return fromAgentResult(agentResult, plan);
         }
 
@@ -109,6 +112,18 @@ public class McpToolOrchestrator {
             plan.maxSteps(),
             plan.stopCondition(),
             plan.planningReason());
+    }
+
+    private String selectedMcpServerName(ChatPlan plan) {
+        if (plan == null) {
+            return "";
+        }
+        return plan.allowedTools().stream()
+            .filter(tool -> tool.startsWith("mcp.server:"))
+            .map(tool -> tool.substring("mcp.server:".length()).trim())
+            .filter(name -> !name.isBlank())
+            .findFirst()
+            .orElse("");
     }
 
     private List<String> planRefs(ChatPlan plan, String status) {

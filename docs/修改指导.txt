@@ -1,0 +1,310 @@
+请你基于当前项目代码，重构 PlannerService，将现有“基于关键词规则判断”的 Planner 改成“LLM 决策型 Planner”。
+
+一、改造目标
+
+当前 PlannerService 存在几个问题：
+1. 通过关键词判断是否是闲聊、是否需要工具、是否是 GitHub/代码仓库任务，容易误判。
+2. 当前支持前端通过 externalMcpCalls 显式指定外部 MCP 工具调用，但本项目暂时不需要这个能力。
+3. 我希望由大模型根据用户问题、当前阅读上下文、RAG/Memory 开关和可用工具列表，自己判断：
+   - 是否是闲聊；
+   - 是否需要调用工具；
+   - 是否需要调用记忆 memory.search；
+   - 是否需要调用 RAG 检索 rag.search；
+   - 是否需要当前页面/划词上下文 context.get_current_page；
+   - 是否需要最近对话 context.get_recent_dialogue；
+   - 是否需要多工具执行；
+   - 最终回答应该遵循什么要求。
+
+请将 PlannerService 从规则路由改造成：
+
+LLM Planner
+  → 输出结构化 JSON
+  → 后端解析为 ChatPlan
+  → PlanValidator 校验
+  → 校验失败时 fallbackReadingPlan 兜底
+
+注意：
+大模型负责语义判断，后端负责结构校验、安全约束和失败兜底。
+不要直接相信大模型输出，也不要让大模型输出什么工具就执行什么工具。
+二、需要删除或弱化的旧逻辑
+请删除或不再使用以下逻辑：
+
+1. hasExplicitExternalMcpCalls(request)
+2. explicitToolPlan(request, question)
+3. 基于关键词判断 small talk 的逻辑
+4. 基于关键词判断 GitHub / 代码仓库 / commit / README 的逻辑
+5. 前端通过 externalMcpCalls 直接指定工具调用的主流程
+
+如果 AiChatRequest 中仍然保留 externalMcpCalls 字段，可以暂时不删除字段，避免影响兼容性；但 PlannerService 不再根据 externalMcpCalls 生成计划。
+三、保留 AiChatService 主流程
+AiChatService 主流程尽量不要大改，仍然保持：
+
+PlannerService.plan(request)
+  → McpToolOrchestrator.execute/resume()
+  → EvidenceAggregator.aggregate()
+  → FinalAnswerService.answer()
+  → MemoryWriter.write()
+
+本次主要改 Planner 层，不要把 Agent 决策逻辑塞回 AiChatService。
+四、新增或修改的类
+请根据当前项目结构新增或修改这些类：
+
+1. PlannerService
+   - 负责主流程：
+     build prompt
+     → 调用大模型
+     → 解析 JSON
+     → PlanValidator 校验
+     → 返回 ChatPlan
+     → 失败时 fallbackReadingPlan
+
+2. PlannerPromptBuilder
+   - 负责构造 Planner 提示词。
+   - 提示词中必须包含可用工具列表、工具参数说明、输出 JSON schema 和规划规则。
+
+3. PlanValidator
+   - 负责校验大模型输出是否合法。
+   - 校验失败时抛出异常或返回 fallback 标记。
+
+4. LlmPlanResponse
+   - 用于承接大模型输出 JSON。
+
+5. LlmToolStep
+   - 用于承接 toolPlan 中的单个工具步骤。
+
+6. AvailableTool
+   - 描述工具名称、用途、参数、是否读操作、是否写操作、是否需要确认。
+
+7. ToolRegistry
+   - 维护当前系统可用工具白名单。
+五、大模型必须输出的 JSON 格式
+请在 PlannerPromptBuilder 中明确要求：
+
+大模型只能输出 JSON。
+不能输出 Markdown。
+不能输出代码块。
+不能输出解释文字。
+不能缺字段。
+不能输出不在白名单里的工具。
+
+JSON 格式必须如下：
+{
+  "taskType": "READING_QA",
+  "standaloneQuestion": "用户问题改写后的独立问题",
+  "dependsOnContext": true,
+  "executionMode": "MULTI_TOOL",
+  "allowedTools": [
+    "context.get_recent_dialogue",
+    "context.get_current_page",
+    "memory.search",
+    "rag.search"
+  ],
+  "toolPlan": [
+    {
+      "toolName": "context.get_recent_dialogue",
+      "arguments": {
+        "userId": "default_user",
+        "sessionId": "book_44_chapter_1",
+        "limit": 5
+      },
+      "reason": "用户问题可能依赖最近对话，需要补充上下文。"
+    },
+    {
+      "toolName": "rag.search",
+      "arguments": {
+        "bookId": 44,
+        "chapterIndex": 1,
+        "query": "差序格局是什么意思",
+        "topK": 5
+      },
+      "reason": "用户询问书籍概念，需要检索书籍证据。"
+    }
+  ],
+  "taskGoal": "解释当前阅读问题",
+  "maxSteps": 2,
+  "stopCondition": "完成 toolPlan 中的工具调用后停止",
+  "answerGuidance": "优先使用当前页面、最近对话和 RAG 证据；如果证据不足，明确说明，不要编造。"
+}
+六、字段枚举和含义
+taskType 只允许：
+
+SMALL_TALK
+GENERAL_QA
+READING_QA
+MEMORY_QA
+NOTE_QA
+READING_PLAN
+TOOL_ACTION
+
+含义：
+SMALL_TALK：问候、感谢、简单闲聊，不需要工具。
+GENERAL_QA：通用问题，不强依赖书籍内容。
+READING_QA：阅读问答，需要结合书籍、章节、划词或 RAG。
+MEMORY_QA：需要结合用户长期记忆的问题。
+NOTE_QA：需要查询用户笔记的问题。
+READING_PLAN：制定阅读计划、学习计划。
+TOOL_ACTION：需要执行保存、创建、更新等工具动作。
+executionMode 只允许：
+
+NO_TOOL
+SINGLE_TOOL
+MULTI_TOOL
+BOUNDED_REACT
+
+含义：
+NO_TOOL：不调用工具，直接回答。
+SINGLE_TOOL：只调用一个工具。
+MULTI_TOOL：按 toolPlan 顺序调用多个工具。
+BOUNDED_REACT：多步探索，根据上一步工具结果决定下一步；当前阶段可以保留枚举，但默认少用。
+七、当前可用工具白名单
+当前 Planner 先只开放内部工具：
+
+1. context.get_recent_dialogue
+   作用：获取当前用户当前会话最近几轮对话。
+   参数：userId, sessionId, limit。
+   类型：读操作。
+
+2. context.get_current_page
+   作用：获取当前页面、章节、划词和划词上下文。
+   参数：bookId, chapterIndex, chapterTitle, selectedText, selectedContext。
+   类型：读操作。
+
+3. memory.search
+   作用：检索用户长期记忆，例如阅读偏好、历史问题、学习目标。
+   参数：userId, sessionId, query, limit。
+   类型：读操作。
+
+4. rag.search
+   作用：检索书籍内容证据。
+   参数：bookId, chapterIndex, query, topK。
+   类型：读操作。
+
+如果项目中已经有以下工具，可以加入白名单；如果没有，不要强行输出或调用：
+
+5. note.search
+   作用：检索用户笔记。
+   参数：userId, bookId, query, limit。
+   类型：读操作。
+
+6. reading_progress.query
+   作用：查询用户阅读进度。
+   参数：userId, bookId。
+   类型：读操作。
+
+7. learning_plan.save
+   作用：保存阅读计划或学习计划。
+   参数：userId, bookId, planContent。
+   类型：写操作。
+   注意：写操作需要用户确认，不能直接执行。
+八、PlannerPromptBuilder 中的规划规则
+请把以下规则写入 PlannerPromptBuilder：
+
+1. 你是个人阅读成长 Agent 系统的 Planner。
+2. 你的任务不是回答用户问题，而是生成工具执行计划。
+3. 如果是简单问候、感谢、闲聊，使用 NO_TOOL，toolPlan 为空。
+4. 如果问题可以直接回答且不依赖书籍证据，使用 NO_TOOL。
+5. 如果用户问题依赖“这里、这个、它、这句话、刚才内容”等上下文，优先考虑 context.get_current_page 和 context.get_recent_dialogue。
+6. 如果用户要求“书里怎么说、作者怎么说、这一章讲了什么、举了什么例子”，优先调用 rag.search。
+7. 如果用户要求“结合我之前、按照我的习惯、我之前问过什么”，优先调用 memory.search。
+8. 如果用户要求查询笔记，调用 note.search。
+9. 如果用户要求制定阅读计划，可以先调用 memory.search 和 reading_progress.query，再生成计划。
+10. 如果用户要求保存计划，规划 learning_plan.save，但该工具是写操作，需要确认，不能直接执行。
+11. 不要输出不存在的工具。
+12. 不要为了调用工具而调用工具。
+13. allowedTools 只能包含本次可能用到的工具。
+14. toolPlan 只能包含本次实际要执行的工具。
+15. maxSteps 不能超过 5。
+16. 如果 executionMode 是 NO_TOOL，toolPlan 必须为空。
+17. 如果 executionMode 是 SINGLE_TOOL，toolPlan 只能有 1 个工具。
+18. 如果 executionMode 是 MULTI_TOOL，toolPlan 可以有多个工具，但不能超过 maxSteps。
+19. standaloneQuestion 要尽量把“这里/这个/它/这句话”等指代改写成可独立理解的问题。
+20. answerGuidance 要告诉最终回答服务如何回答，例如是否需要直接讲故事、是否需要引用证据、是否避免模板化开头。
+九、PlanValidator 校验规则
+请新增 PlanValidator，至少校验以下内容：
+
+1. JSON 必须能解析。
+2. taskType 必须属于允许枚举。
+3. executionMode 必须属于允许枚举。
+4. allowedTools 中的工具必须存在于 ToolRegistry 白名单。
+5. toolPlan 中的 toolName 必须存在于 allowedTools。
+6. toolPlan 中的 toolName 必须存在于 ToolRegistry 白名单。
+7. maxSteps 必须 >= 0 且 <= 5。
+8. toolPlan.size() 不能大于 maxSteps。
+9. NO_TOOL 模式下 toolPlan 必须为空。
+10. SINGLE_TOOL 模式下 toolPlan.size() 必须等于 1。
+11. MULTI_TOOL 模式下 toolPlan.size() >= 1。
+12. 写操作工具，例如 learning_plan.save，不能直接执行，必须触发 confirmation。
+13. 如果模型输出外部 MCP 工具，但配置未开启 externalMcpEnabled，则拒绝该计划。
+14. 如果校验失败，记录日志，并回退到 fallbackReadingPlan。
+十、fallbackReadingPlan 兜底逻辑
+当 LLM Planner 调用失败、JSON 解析失败或 PlanValidator 校验失败时，回退到 fallbackReadingPlan。
+
+fallbackReadingPlan 规则：
+
+1. 默认加入 context.get_recent_dialogue。
+2. 如果 request 中有 selectedText 或 selectedContext，加入 context.get_current_page。
+3. 如果 request.isMemoryEnabled() 为 true，加入 memory.search。
+4. 如果 request.isRagEnabled() 为 true，加入 rag.search。
+5. 根据 toolPlan 数量决定 executionMode：
+   - 0 个工具：NO_TOOL
+   - 1 个工具：SINGLE_TOOL
+   - 多个工具：MULTI_TOOL
+
+fallbackReadingPlan 的 answerGuidance：
+优先使用当前页面、最近对话和 RAG 证据；如果证据不足，明确说明，不要编造；不要用“简单来说”作为固定开头。
+十一、测试要求
+请补充或修改单元测试，至少覆盖：
+
+1. 闲聊问题
+输入：“你好”
+期望：executionMode = NO_TOOL，toolPlan 为空。
+
+2. 划词问答
+输入：“这里是什么意思？”，并带 selectedText / selectedContext
+期望：包含 context.get_current_page。
+
+3. 书籍证据问答
+输入：“书里是怎么解释差序格局的？”
+期望：包含 rag.search。
+
+4. 记忆相关问题
+输入：“结合我之前的理解说一下。”
+期望：包含 memory.search。
+
+5. 多工具问题
+输入：“结合我之前的问题和书里的内容解释一下。”
+期望：包含 memory.search 和 rag.search。
+
+6. 非法工具
+模型输出 toolName = system.delete_all
+期望：PlanValidator 拒绝，并 fallbackReadingPlan。
+
+7. 外部 MCP 未开启
+模型输出 external.github.search_code
+期望：PlanValidator 拒绝，并 fallbackReadingPlan。
+
+8. NO_TOOL 但 toolPlan 非空
+期望：PlanValidator 拒绝。
+
+9. maxSteps 超过 5
+期望：PlanValidator 拒绝或 fallback，建议 fallback。
+
+10. JSON 格式错误
+期望：捕获异常并 fallbackReadingPlan。
+十二、实现约束
+实现时注意：
+
+1. 不要破坏 AiChatController、AiChatRequest、AiChatResponse 的现有接口兼容性。
+2. 不要把大段 Prompt 写死在 PlannerService 里，Prompt 构造放到 PlannerPromptBuilder。
+3. 不要让 McpToolOrchestrator 接收未经校验的大模型输出。
+4. 不要把所有工具默认都加入 toolPlan，必须由 LLM 判断是否需要。
+5. 不要把 externalMcpCalls 作为主路径。
+6. 允许保留 BOUNDED_REACT 枚举，但当前阶段不要默认开放外部 MCP 工具。
+7. 如果项目当前没有 note.search、reading_progress.query、learning_plan.save，不要强行实现完整业务，只需要 ToolRegistry 支持未来扩展即可。
+8. 修改完成后，请说明：
+   - 修改了哪些类；
+   - 新增了哪些类；
+   - PlannerService 新流程；
+   - JSON schema；
+   - fallback 触发条件；
+   - 单元测试覆盖情况。
