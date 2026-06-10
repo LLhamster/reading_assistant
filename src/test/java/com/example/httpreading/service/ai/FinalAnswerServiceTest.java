@@ -3,6 +3,7 @@ package com.example.httpreading.service.ai;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -28,24 +29,66 @@ class FinalAnswerServiceTest {
         assertTrue(prompt.contains("不要重新回答“为什么他们重要”"));
         assertTrue(prompt.contains("不要反复使用“首先、其次、综上所述”这套论文腔"));
         assertTrue(prompt.contains("控制在 4-6 段"));
-        assertTrue(prompt.contains("开头要自然、直接回答问题"));
         assertTrue(prompt.contains("先翻译成普通人的话"));
         assertTrue(prompt.contains("简单说"));
         assertTrue(prompt.contains("不要固定标题式结构"));
-        assertTrue(prompt.contains("每个原因后面都必须解释“为什么”"));
-        assertTrue(prompt.contains("不要把这些结构标签展示给用户"));
+        assertTrue(prompt.contains("每个原因后面都要解释“为什么”"));
         assertTrue(prompt.contains("不要在最终回答中完整展示 working memory"));
-        assertTrue(prompt.contains("最多写“最近对话摘要”或“相关记忆”"));
-        assertTrue(prompt.contains("不要脱离当前章节"));
+        assertTrue(prompt.contains("记忆最多概括为“最近对话摘要”或“相关记忆”"));
         assertTrue(prompt.contains("requiresConcreteExample=true"));
         assertTrue(prompt.contains("requiresStorytelling=true"));
         assertTrue(prompt.contains("answerMode=CONTEXT_ANCHORED_MODEL_KNOWLEDGE"));
-        assertTrue(prompt.contains("允许基于常识补充"));
+        assertTrue(prompt.contains("本系统不是纯 RAG 摘录器"));
+        assertTrue(prompt.contains("最终回答应以用户问题为主"));
+        assertTrue(prompt.contains("collectedEvidence 默认不是唯一依据"));
+        assertTrue(prompt.contains("允许根据公共知识回答"));
+        assertTrue(prompt.contains("当前资料没有直接解释，下面是基于一般知识的辅助理解"));
+        assertTrue(prompt.contains("为帮助理解补充的常识解释"));
+        assertTrue(prompt.contains("问题要求具体出处、具体人物、具体事件、具体时间地点"));
         assertTrue(prompt.contains("不要低价值复述资料关键词"));
         assertTrue(prompt.contains("更具体的焦点术语"));
         assertTrue(prompt.contains("不能因为关键词重叠就回答成母概念的一般例子"));
         assertTrue(prompt.contains("没有实际执行 GitHub、网页或外部实时搜索"));
-        assertTrue(prompt.contains("不要把历史记忆当成当前 GitHub 实时结果"));
+        assertTrue(prompt.contains("不能说“根据本次搜索结果”"));
+        assertTrue(prompt.contains("当前未收集到足够证据；以上为一般知识辅助理解"));
+    }
+
+    @Test
+    void promptAllowsModelKnowledgeForConceptExplanationWithEmptyEvidence() {
+        FinalAnswerService service = new FinalAnswerService(mock(ModelClient.class));
+
+        String prompt = service.buildPrompt(request(), conceptExplanationPlan(), emptyEvidence());
+
+        assertTrue(prompt.contains("answerMode=CONTEXT_ANCHORED_MODEL_KNOWLEDGE"));
+        assertTrue(prompt.contains("即使 collectedEvidence 为空，也允许根据公共知识回答"));
+        assertTrue(prompt.contains("当前资料没有直接解释，下面是基于一般知识的辅助理解"));
+        assertTrue(prompt.contains("这不是原文直接证据"));
+        assertTrue(prompt.contains("当前未收集到足够证据；以上为一般知识辅助理解"));
+    }
+
+    @Test
+    void textOnlyPromptStillRequiresEvidenceOnlyAnswerWhenEvidenceIsEmpty() {
+        FinalAnswerService service = new FinalAnswerService(mock(ModelClient.class));
+
+        String prompt = service.buildPrompt(request(), textOnlyPlan(), emptyEvidence());
+
+        assertTrue(prompt.contains("answerMode=TEXT_ONLY"));
+        assertTrue(prompt.contains("只能基于 collectedEvidence 回答"));
+        assertTrue(prompt.contains("answerMode=TEXT_ONLY：只说明当前资料没有直接解释"));
+        assertTrue(prompt.contains("不要补充资料外内容"));
+    }
+
+    @Test
+    void doesNotRewriteRealCaseAnswerThatRefusesToInventWithoutEvidence() {
+        ModelClient modelClient = mock(ModelClient.class);
+        FinalAnswerService service = new FinalAnswerService(modelClient);
+        String insufficient = "当前资料缺少有出处的具体案例证据，也没有提供具体人物、地点、日期或事件线索，所以我不能编造一个真实案例。需要更多资料或外部搜索后，才能把某个案例完整讲出来。";
+        when(modelClient.chat(org.mockito.ArgumentMatchers.anyString())).thenReturn(insufficient);
+
+        String answer = service.answer(request(), realCaseNoEvidencePlan(), emptyEvidence());
+
+        assertTrue(answer.contains("不能编造"));
+        verify(modelClient, times(1)).chat(org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test
@@ -279,6 +322,68 @@ class FinalAnswerServiceTest {
             "必须说明当前没有可用 GitHub/外部搜索工具，不能声称已经实时搜索。");
     }
 
+    private ChatPlan conceptExplanationPlan() {
+        return new ChatPlan(
+            "机会主义是什么意思？",
+            "结合当前阅读内容，解释机会主义是什么意思。",
+            "概念解释",
+            PlannerTaskType.READING_QA,
+            SubIntent.NONE,
+            new AnswerRequirement(false, false, false, false, false, false,
+                true, true, false, DetailLevel.MEDIUM),
+            AnswerMode.CONTEXT_ANCHORED_MODEL_KNOWLEDGE,
+            EvidenceStrictness.MEDIUM,
+            true,
+            ToolExecutionMode.NO_TOOL,
+            List.of(),
+            List.of(),
+            "解释概念",
+            0,
+            "无工具",
+            "资料不足时允许公共知识辅助解释，但必须区分原文证据和补充理解。");
+    }
+
+    private ChatPlan textOnlyPlan() {
+        return new ChatPlan(
+            "只根据原文回答机会主义是什么意思？",
+            "只根据原文回答机会主义是什么意思。",
+            "严格原文",
+            PlannerTaskType.READING_QA,
+            SubIntent.NONE,
+            AnswerRequirement.normal(),
+            AnswerMode.TEXT_ONLY,
+            EvidenceStrictness.STRICT,
+            true,
+            ToolExecutionMode.NO_TOOL,
+            List.of(),
+            List.of(),
+            "只根据原文回答",
+            0,
+            "无工具",
+            "只能根据当前资料回答。");
+    }
+
+    private ChatPlan realCaseNoEvidencePlan() {
+        return new ChatPlan(
+            "给我讲一个真实历史案例",
+            "请给出一个有出处的真实历史案例，并说明它如何对应当前阅读观点。",
+            "真实案例",
+            PlannerTaskType.READING_QA,
+            SubIntent.HISTORICAL_CASE,
+            new AnswerRequirement(true, true, false, false, true, false,
+                false, false, false, DetailLevel.MEDIUM),
+            AnswerMode.TEXT_ONLY,
+            EvidenceStrictness.STRICT,
+            true,
+            ToolExecutionMode.NO_TOOL,
+            List.of(),
+            List.of(),
+            "回答真实案例",
+            0,
+            "无工具",
+            "没有证据时不要编造真实案例。");
+    }
+
     private CollectedEvidence evidence() {
         return new CollectedEvidence(
             List.of(new EvidenceItem("e1", "rag_current_chapter", "当前章", "农民人数众多，受压迫深。", 20, 0.9d, java.util.Map.of())),
@@ -323,5 +428,15 @@ class FinalAnswerServiceTest {
             List.of(),
             List.of(),
             "已收集证据：\n【相关记忆】之前记录过 httpreading 项目。");
+    }
+
+    private CollectedEvidence emptyEvidence() {
+        return new CollectedEvidence(
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            "");
     }
 }

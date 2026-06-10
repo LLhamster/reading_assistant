@@ -47,25 +47,30 @@ public class FinalAnswerService {
             
             重要边界：
             - 你现在处于最终回答阶段，不允许提出、规划或执行任何工具调用。
-            - collectedEvidence 是优先依据，但不是所有模式下的唯一依据。
+            - 本系统不是纯 RAG 摘录器。最终回答应以用户问题为主，collectedEvidence 用于确定上下文、事实锚点和边界。
+            - collectedEvidence 默认不是唯一依据；只有在严格证据场景下，才把回答限制为复述或归纳资料。
+            - 大模型可以使用公共知识进行理解、解释、类比、背景补充和表达组织，但不能把公共知识说成当前资料直接支持的内容。
+            - 以下情况必须严格限制在 collectedEvidence 或外部工具证据内：用户明确要求“只根据原文/资料回答”；answerMode=TEXT_ONLY；问题要求具体出处、具体人物、具体事件、具体时间地点；问题涉及 GitHub、网页、实时信息、论文真实性等外部事实核验。
             - 你必须严格遵守 answerMode：
             1. answerMode=TEXT_ONLY：
                 只能基于 collectedEvidence 回答。资料没有提到就明确说明“当前资料没有直接提到”，不要补充资料外内容。
             2. answerMode=CONTEXT_ANCHORED_MODEL_KNOWLEDGE：
-                collectedEvidence 是理解锚点。可以使用模型常识补充解释、例子、类比和常见情形，但必须区分“当前资料支持的内容”和“为了帮助理解补充的解释”。
+                collectedEvidence 是理解锚点。可以使用模型公共知识补充理解、解释、背景、类比和常见情形，但必须区分“当前资料直接支持的内容”和“为帮助理解补充的常识解释”。
             3. answerMode=EXTERNAL_SEARCH_REQUIRED：
                 如果 collectedEvidence 没有 externalMcpRefs，必须明确说明当前没有实际执行 GitHub、网页或外部实时搜索；不能说“我搜索到”“本次搜索结果显示”“根据 GitHub 搜索结果”。
             
             证据使用规则：
             - 对阅读问题，优先依据当前页面/划词、RAG 和记忆证据。
+            - 对概念解释、理解辅助、原因分析、类比说明类问题，即使 collectedEvidence 为空，也允许根据公共知识回答；但必须先说明“当前资料没有直接解释，下面是基于一般知识的辅助理解”。
             - 如果 collectedEvidence 为空：
             1. answerMode=TEXT_ONLY：只说明当前资料没有直接解释，并提示需要更多上下文或原文证据。
-            2. answerMode=CONTEXT_ANCHORED_MODEL_KNOWLEDGE：先说明当前资料没有直接解释，再给出清楚的辅助解释，并明确这是补充理解，不是原文直接证据。
+            2. answerMode=CONTEXT_ANCHORED_MODEL_KNOWLEDGE：先说明“当前资料没有直接解释，下面是基于一般知识的辅助理解”，再给出清楚的辅助解释，并明确这不是原文直接证据。
             3. answerMode=EXTERNAL_SEARCH_REQUIRED：说明需要外部搜索或明确出处支持，不要把不确定细节说死。
             - 如果答案依据来自 memoryRefs，只能说“根据历史记忆/之前记录”，不能说“根据本次搜索结果”。
             - 最近对话只用于理解追问指向，不能当作正文材料大段复述。
             - 不要在最终回答中完整展示 working memory、episodic memory 或 semantic memory 的原始内容；记忆最多概括为“最近对话摘要”或“相关记忆”。
             - 对 GitHub、代码仓库或外部工具问题，严格依据 externalMcpRefs；如果没有 externalMcpRefs，就说明当前没有实际执行外部搜索。
+            - 对真实案例、具体人物、具体事件类问题：如果 collectedEvidence 有完整证据，直接基于证据回答；如果只有线索，围绕线索讲清楚，并说明缺少具体姓名、地点、日期或出处；如果没有任何线索，不要编造具体案例，应说明需要更多资料或外部搜索。
             - 如果证据不足，直接说明缺少哪些信息，不要编造。
             
             表达风格：
@@ -93,11 +98,11 @@ public class FinalAnswerService {
             
             answerRequirement 规则：
             - 当 answerRequirement.allowModelKnowledge=true 时，允许基于常识补充，但不要假装这些补充都来自原文。
-            - 当 answerRequirement.mustDistinguishTextEvidenceAndSupplement=true 时，要明确区分“当前资料/原文支持的内容”和“补充解释/常识例子”。
+            - 当 answerRequirement.mustDistinguishTextEvidenceAndSupplement=true 时，要明确区分“当前资料直接支持的内容”和“为帮助理解补充的常识解释”。
             - 当 answerRequirement.avoidRepeatingSourcePhrases=true 时，不要低价值复述资料关键词；如果资料已经说“税、费、劳务、摊派”，就要扩展成具体项目，例如农业税、特产税、屠宰税、教育附加费、水利建设费、乡统筹、村提留、修路修渠出工、临时集资等。
             - 如果用户问的是一个更具体的焦点术语，而它包含某个更宽泛的母概念，例如“X税”相对于“税”、“X成本”相对于“成本”，必须先说明焦点术语和母概念的区别；例子必须属于焦点术语本身，不能因为关键词重叠就回答成母概念的一般例子。
-            - 当 answerRequirement.requiresConcreteExample=true 时，不要再按普通概念解释模板回答；必须直接给出具体例子名称、人物/群体、处境、处理方式，以及这个例子如何对应原文观点。
-            - 当 answerRequirement.requiresStorytelling=true 时，回答要像讲案例故事：直接引入具体企业/人物，讲起点、发展过程、关键转折、结果，再回扣原文；至少包含企业/地区/人物/初始业务/政策背景/地方政府作用/发展阶段/关键转折中的 3 类信息。
+            - 当 answerRequirement.requiresConcreteExample=true 时，先判断用户要的是理解辅助型例子还是真实案例/具体人物/具体事件。理解辅助型例子可以用常识补充；真实案例必须有资料线索或外部证据，不能凭空编造。
+            - 当 answerRequirement.requiresStorytelling=true 且有可靠案例证据时，回答要像讲案例故事：直接引入具体企业/人物，讲起点、发展过程、关键转折、结果，再回扣原文；至少包含企业/地区/人物/初始业务/政策背景/地方政府作用/发展阶段/关键转折中的 3 类信息。没有可靠案例证据时，要说明当前资料缺少可展开成故事的具体案例。
             - 当 answerRequirement.avoidConceptualOpening=true 时，不要用“简单说”“总的来说”“这句话的意思是”“可以理解为”作为开头。
             - 如果用户要求具体案例且 answerRequirement.allowModelKnowledge=false，同时 collectedEvidence 没有可靠案例资料，不要编造，直接回答“当前资料只支持概念解释，暂时不能给出有出处的具体案例。”
             
@@ -110,7 +115,7 @@ public class FinalAnswerService {
             - 直接回答用户问题。
             - 如果有证据，结合证据解释。
             - 如果有补充解释，明确区分“当前资料支持什么”和“补充理解是什么”。
-            - 最后列出关键来源；如果没有来源，就写“关键来源：当前未收集到足够证据”。
+            - 最后列出关键来源；如果没有来源，就写“关键来源：当前未收集到足够证据；以上为一般知识辅助理解”。
             - 不要展开来源原文。
 
             当前阅读位置：bookId=%s, chapterIndex=%s
@@ -163,9 +168,12 @@ public class FinalAnswerService {
         }
         if (requirement.requiresConcreteExample()) {
             if (answer.contains("当前资料只支持概念解释")) {
-                if (requirement.allowModelKnowledge()) {
+                if (requirement.allowModelKnowledge() && !isRealCaseRequest(plan)) {
                     return "用户要求的是理解辅助型例子，允许模型常识补充，不能直接用“当前资料只支持概念解释”拒答。";
                 }
+                return "";
+            }
+            if (!hasReliableConcreteEvidence(evidence) && hasInsufficientConcreteEvidenceNotice(answer)) {
                 return "";
             }
             if (!requirement.allowModelKnowledge() && !hasReliableConcreteEvidence(evidence) && !hasConcreteCaseSignal(answer)) {
@@ -211,12 +219,16 @@ public class FinalAnswerService {
             %s
 
             重写要求：
+            - 本系统不是纯 RAG 摘录器；最终回答以用户问题为主，证据用于确定上下文、事实锚点和边界。
+            - 如果问题是概念解释、理解辅助、原因分析或类比说明，即使 collectedEvidence 为空，也可以基于一般知识辅助回答；开头要说明“当前资料没有直接解释，下面是基于一般知识的辅助理解”。
+            - 使用公共知识补充时，必须区分“当前资料直接支持的内容”和“为帮助理解补充的常识解释”，不能把补充内容伪装成原文证据。
+            - 如果用户要真实案例、具体人物或具体事件，只有 collectedEvidence 有完整证据时才直接讲；只有线索时围绕线索讲并说明缺少姓名、地点、日期或出处；没有线索时不要编造，说明需要更多资料或外部搜索。
             - 如果 answerMode=CONTEXT_ANCHORED_MODEL_KNOWLEDGE 或 allowModelKnowledge=true，当前资料是理解锚点，允许补充常识例子；不要因为 RAG 没逐项列出就拒答。
             - 如果 answerMode=EXTERNAL_SEARCH_REQUIRED 且没有外部 MCP 证据，必须说明当前没有实际执行 GitHub、网页或外部实时搜索；不能把历史记忆、RAG 或模型常识说成本次搜索结果。
             - 如果用户问的是“既然 A 有问题，为什么仍然做 B”，必须把重点放在“为什么仍然做 B”：它要解决什么更大问题、当时的优先目标是什么、做这个选择的权衡和代价是什么；不要继续复述 A 的后果。
             - 如果用户问“有哪些税/举例有哪些税/具体有哪些负担”，必须给出具体项目，例如农业税、特产税、屠宰税、教育附加费、水利建设费、乡统筹、村提留、修路修渠出工、临时集资；同时说明有些严格说是税，有些更接近费或摊派。
             - 如果用户问的是更具体的焦点术语，不要退回母概念的一般清单；先说明焦点术语和母概念的区别，再给属于焦点术语本身的例子。
-            - 如果用户要具体例子，必须直接给出具体人物/企业/组织/历史事件或具体项目；只有在 answerMode=TEXT_ONLY 且证据不足时，才明确说“当前资料只支持概念解释，暂时不能给出有出处的具体案例。”
+            - 如果用户要理解辅助型具体例子，可以直接给出具体项目或常识例子；如果用户要真实案例、具体人物、企业、组织或历史事件，证据不足时不要硬编，明确说当前资料缺少有出处的具体案例。
             - 如果用户要完整故事，必须直接进入案例，讲起点、发展、转折、结果，再回扣原文观点。
             - 不要再用“简单说/总的来说/这句话的意思是/可以理解为”作为故事型案例开头。
             - 不要重复上一轮抽象解释或上一轮已经列过的清单；如果前面已经列过税费名目，这次要改成具体场景、分类区别、为什么它们都会变成农民负担。
@@ -253,6 +265,23 @@ public class FinalAnswerService {
     private boolean hasReliableConcreteEvidence(CollectedEvidence evidence) {
         return evidence != null && evidence.items().stream()
             .anyMatch(item -> item.type().startsWith("rag") || "current_page".equals(item.type()));
+    }
+
+    private boolean hasInsufficientConcreteEvidenceNotice(String answer) {
+        String text = normalize(answer);
+        return text.matches(".*(当前资料|collectedEvidence|证据|材料|原文).*?(缺少|没有|不足|未提供|找不到).*?(具体案例|真实案例|人物|事件|姓名|地点|日期|出处|线索).*")
+            || text.matches(".*(需要|建议).*?(更多资料|外部搜索|明确出处|具体线索).*");
+    }
+
+    private boolean isRealCaseRequest(ChatPlan plan) {
+        if (plan == null) {
+            return false;
+        }
+        String text = normalize(plan.originalQuestion() + " " + plan.standaloneQuestion() + " " + plan.answerGuidance());
+        return plan.subIntent() == SubIntent.HISTORICAL_CASE
+            || plan.subIntent() == SubIntent.STORYTELLING_CASE
+            || plan.answerRequirement().requiresStorytelling()
+            || text.matches(".*(真实案例|具体案例|历史案例|具体人物|具体事件|某一个企业|某个企业|完整故事|完整地说|有出处).*");
     }
 
     private boolean hasConcreteCaseSignal(String answer) {

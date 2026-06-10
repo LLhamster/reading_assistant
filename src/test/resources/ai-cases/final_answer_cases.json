@@ -1,0 +1,108 @@
+[
+  {
+    "caseId": "historical_story_001",
+    "caseName": "真实故事追问：只有划词线索",
+    "category": "HISTORICAL_STORY",
+    "input": {
+      "userId": "11",
+      "bookId": 44,
+      "chapterIndex": 2,
+      "chapterTitle": "02、湖南农民运动考察报告",
+      "question": "有没有真实发生的故事？",
+      "selectedText": "好些中小地主、富农乃至中农，从前反对农会的，此刻求入农会不可得",
+      "selectedContext": "农民这样回答。好些中小地主、富农乃至中农，从前反对农会的，此刻求入农会不可得。我到各处，常常遇到这种人，这样向我求情：“请省里来的委员作保！”",
+      "memoryEnabled": true,
+      "ragEnabled": true,
+      "externalMcpEnabled": false
+    },
+    "mockEvidence": {
+      "formattedEvidence": "已收集证据：\n【证据1】当前阅读页面划词：02、湖南农民运动考察报告\n【用户划词】好些中小地主、富农乃至中农，从前反对农会的，此刻求入农会不可得\n【划词附近上下文】农民这样回答。好些中小地主、富农乃至中农，从前反对农会的，此刻求入农会不可得。我到各处，常常遇到这种人，这样向我求情：“请省里来的委员作保！”",
+      "items": [
+        {
+          "id": "current-page-1",
+          "type": "current_page",
+          "source": "当前阅读页面划词",
+          "content": "好些中小地主、富农乃至中农，从前反对农会的，此刻求入农会不可得。我到各处，常常遇到这种人，这样向我求情：“请省里来的委员作保！”",
+          "priority": 10,
+          "relevance": 1.0
+        }
+      ],
+      "sources": ["当前阅读页面划词"]
+    },
+    "expectedPlan": {
+      "taskType": "READING_QA",
+      "subIntentAnyOf": ["HISTORICAL_CASE", "STORYTELLING_CASE"],
+      "executionModeAnyOf": ["SINGLE_TOOL", "MULTI_TOOL"],
+      "answerMode": "CONTEXT_ANCHORED_MODEL_KNOWLEDGE",
+      "evidenceStrictnessAnyOf": ["MEDIUM", "LOOSE"],
+      "mustUseToolsAnyOf": ["context.get_current_page", "rag.search"],
+      "mustNotUseTools": ["memory.search", "external.github.search"],
+      "requirements": {
+        "requiresConcreteExample": true,
+        "requiresStorytelling": true,
+        "requiresDetailedProcess": true,
+        "allowModelKnowledge": true,
+        "mustDistinguishTextEvidenceAndSupplement": true
+      }
+    },
+    "expectedAnswerRules": {
+      "mustContain": ["从前反对农会", "求入农会", "作保", "不轻易接纳"],
+      "mustNotContain": ["张三", "某某村", "本次搜索结果显示", "根据 GitHub 搜索结果"],
+      "requiredSemanticChecks": [
+        "不能只复述原文",
+        "必须讲出故事过程",
+        "必须说明没有具体姓名、村庄、日期时不能编造"
+      ]
+    },
+    "mockPlannerResponse": "{\"taskType\":\"READING_QA\",\"subIntent\":\"STORYTELLING_CASE\",\"standaloneQuestion\":\"结合当前划词，讲一个原文中能支持的真实发生的故事过程。\",\"dependsOnContext\":true,\"executionMode\":\"MULTI_TOOL\",\"allowedTools\":[\"context.get_current_page\",\"rag.search\"],\"toolPlan\":[{\"toolName\":\"context.get_current_page\",\"arguments\":{\"bookId\":44,\"chapterIndex\":2,\"chapterTitle\":\"02、湖南农民运动考察报告\",\"selectedText\":\"好些中小地主、富农乃至中农，从前反对农会的，此刻求入农会不可得\",\"selectedContext\":\"农民这样回答。好些中小地主、富农乃至中农，从前反对农会的，此刻求入农会不可得。我到各处，常常遇到这种人，这样向我求情：“请省里来的委员作保！”\"},\"reason\":\"用户要求基于划词讲故事，需要当前页面线索。\"},{\"toolName\":\"rag.search\",\"arguments\":{\"bookId\":44,\"chapterIndex\":2,\"query\":\"中小地主 富农 中农 从前反对农会 求入农会 作保 真实故事\",\"topK\":5},\"reason\":\"检索同章证据，避免编造具体故事。\"}],\"taskGoal\":\"讲清划词里的故事过程\",\"maxSteps\":2,\"stopCondition\":\"完成页面和 RAG 证据检索后停止\",\"answerGuidance\":\"围绕原文线索讲故事过程；没有具体姓名、村庄、日期时必须说明不能编造。\",\"answerMode\":\"CONTEXT_ANCHORED_MODEL_KNOWLEDGE\",\"evidenceStrictness\":\"MEDIUM\",\"answerRequirement\":{\"requiresConcreteExample\":true,\"requiresSpecificEntity\":true,\"requiresStorytelling\":true,\"requiresDetailedProcess\":true,\"avoidConceptualOpening\":true,\"avoidRepeatingPreviousExplanation\":false,\"allowModelKnowledge\":true,\"mustDistinguishTextEvidenceAndSupplement\":true,\"avoidRepeatingSourcePhrases\":false,\"minDetailLevel\":\"HIGH\"},\"planningReason\":\"用户要真实故事，应以划词证据为线索讲过程，并标清证据边界。\"}",
+    "mockFinalAnswer": "背景是这样的：原文没有给出具体姓名、村庄、日期，所以不能编造张冠李戴的真实人物；但它给出了一条很清楚的现场线索，可以把这件事的过程讲出来。\n\n从前，这些中小地主、富农乃至一部分中农反对农会，说明他们一开始站在农会之外，甚至把农会当成会损害自己利益的力量。后来农会势力起来，乡村权力关系变了，他们发现自己再站在外面会很被动，于是转过来求入农会。\n\n关键转折在“此刻求入农会不可得”：农会并不是谁想进就进，而是会看这个人过去的态度和现在的立场，所以对从前反对农会的人不轻易接纳。于是这些人只好求情，甚至请“省里来的委员作保”，希望借外部担保改变农会的态度。\n\n这个故事说明的不是某个具名人物，而是一类现场事件：原来反对农会的人，在农会成为乡村政治中心后，反过来想进入农会。当前资料直接支持的是“从前反对农会、后来求入农会、请人作保、农会不轻易接纳”这条过程；补充理解是，这表现了农民运动改变了乡村中谁说了算。关键来源：当前阅读页面划词。"
+  },
+  {
+    "caseId": "followup_no_repeat_001",
+    "caseName": "追问不要重复概念解释",
+    "category": "FOLLOW_UP",
+    "input": {
+      "userId": "11",
+      "bookId": 44,
+      "chapterIndex": 2,
+      "chapterTitle": "02、湖南农民运动考察报告",
+      "question": "不要讲概念，直接举例",
+      "memoryEnabled": true,
+      "ragEnabled": true,
+      "externalMcpEnabled": false
+    },
+    "mockEvidence": {
+      "formattedEvidence": "已收集证据：\n【证据1】最近对话\n用户问题：农民为什么重要？\n助手回答：概念上说，农民是革命同盟军，因为他们人数多、受压迫深、具有反抗动力。\n【证据2】当前资料\n当前资料没有提供具名案例，只提供农民受压迫和组织起来的概括线索。",
+      "items": [
+        {
+          "id": "dialogue-1",
+          "type": "recent_dialogue",
+          "source": "最近对话",
+          "content": "助手回答：概念上说，农民是革命同盟军，因为他们人数多、受压迫深、具有反抗动力。",
+          "priority": 20,
+          "relevance": 0.8
+        }
+      ]
+    },
+    "expectedPlan": {
+      "taskType": "READING_QA",
+      "subIntent": "CONCRETE_EXAMPLE",
+      "answerMode": "CONTEXT_ANCHORED_MODEL_KNOWLEDGE",
+      "requirements": {
+        "requiresConcreteExample": true,
+        "avoidRepeatingPreviousExplanation": true,
+        "allowModelKnowledge": true
+      }
+    },
+    "expectedAnswerRules": {
+      "mustContain": ["当前资料", "具名案例", "例子"],
+      "mustNotContain": ["概念上说，农民是革命同盟军", "本质上"],
+      "requiredSemanticChecks": [
+        "回答不能大段重复上一轮概念解释",
+        "应直接进入例子或说明证据不足"
+      ]
+    },
+    "mockPlannerResponse": "{\"taskType\":\"READING_QA\",\"subIntent\":\"CONCRETE_EXAMPLE\",\"standaloneQuestion\":\"不要重复上一轮概念解释，直接给出农民为什么重要的例子或说明证据不足。\",\"dependsOnContext\":true,\"executionMode\":\"SINGLE_TOOL\",\"allowedTools\":[\"context.get_recent_dialogue\"],\"toolPlan\":[{\"toolName\":\"context.get_recent_dialogue\",\"arguments\":{\"userId\":\"11\",\"sessionId\":\"book_44_chapter_2\",\"limit\":5},\"reason\":\"用户明确要求不要重复，需要最近对话判断上一轮内容。\"}],\"taskGoal\":\"直接举例或说明证据不足\",\"maxSteps\":1,\"stopCondition\":\"取得最近对话后停止\",\"answerGuidance\":\"不要重复上一轮概念解释；直接进入例子，如果当前资料没有具名案例，就说明证据不足。\",\"answerMode\":\"CONTEXT_ANCHORED_MODEL_KNOWLEDGE\",\"evidenceStrictness\":\"MEDIUM\",\"answerRequirement\":{\"requiresConcreteExample\":true,\"requiresSpecificEntity\":false,\"requiresStorytelling\":false,\"requiresDetailedProcess\":false,\"avoidConceptualOpening\":true,\"avoidRepeatingPreviousExplanation\":true,\"allowModelKnowledge\":true,\"mustDistinguishTextEvidenceAndSupplement\":true,\"avoidRepeatingSourcePhrases\":false,\"minDetailLevel\":\"MEDIUM\"},\"planningReason\":\"用户是在追问并要求不要重复概念，应直接处理新增要求。\"}",
+    "mockFinalAnswer": "直接看例子：当前资料没有给出具名案例，所以不能硬编某个村、某个人的故事；但可以用一个贴着资料的场景来说明。比如一个农户长期被税费、劳务和地方摊派压着，平时只觉得日子苦，等农会把大家组织起来，他就从单独忍受变成能集体表达诉求的人。这个例子不是原文中的具名案例，而是基于当前资料线索的辅助场景。关键来源：最近对话和当前资料线索。"
+  }
+]

@@ -1,0 +1,54 @@
+[
+  {
+    "caseId": "evidence_boundary_001",
+    "caseName": "具体是谁：资料没有姓名时不能编造",
+    "category": "EVIDENCE_BOUNDARY",
+    "input": {
+      "userId": "11",
+      "bookId": 44,
+      "chapterIndex": 2,
+      "chapterTitle": "02、湖南农民运动考察报告",
+      "question": "这个具体是谁？",
+      "selectedText": "好些中小地主、富农乃至中农",
+      "selectedContext": "好些中小地主、富农乃至中农，从前反对农会的，此刻求入农会不可得。",
+      "memoryEnabled": true,
+      "ragEnabled": true,
+      "externalMcpEnabled": false
+    },
+    "mockEvidence": {
+      "formattedEvidence": "已收集证据：\n【证据1】当前阅读页面划词\n【用户划词】好些中小地主、富农乃至中农\n【划词附近上下文】好些中小地主、富农乃至中农，从前反对农会的，此刻求入农会不可得。",
+      "items": [
+        {
+          "id": "current-page-1",
+          "type": "current_page",
+          "source": "当前阅读页面划词",
+          "content": "好些中小地主、富农乃至中农，从前反对农会的，此刻求入农会不可得。",
+          "priority": 10,
+          "relevance": 1.0
+        }
+      ],
+      "sources": ["当前阅读页面划词"]
+    },
+    "expectedPlan": {
+      "taskType": "READING_QA",
+      "executionModeAnyOf": ["SINGLE_TOOL", "MULTI_TOOL"],
+      "answerMode": "TEXT_ONLY",
+      "evidenceStrictness": "STRICT",
+      "mustUseToolsAnyOf": ["context.get_current_page"],
+      "requirements": {
+        "requiresSpecificEntity": true,
+        "allowModelKnowledge": false
+      }
+    },
+    "expectedAnswerRules": {
+      "mustContain": ["当前资料", "没有给出具体姓名", "一类人"],
+      "mustNotContain": ["张三", "李四", "毛泽东说的是某个叫", "本次搜索结果显示"],
+      "requiredSemanticChecks": [
+        "应说明当前资料没有给出具体姓名",
+        "可以解释这是一类人"
+      ]
+    },
+    "mockPlannerResponse": "{\"taskType\":\"READING_QA\",\"subIntent\":\"NONE\",\"standaloneQuestion\":\"当前划词里的‘好些中小地主、富农乃至中农’具体是谁？\",\"dependsOnContext\":true,\"executionMode\":\"SINGLE_TOOL\",\"allowedTools\":[\"context.get_current_page\"],\"toolPlan\":[{\"toolName\":\"context.get_current_page\",\"arguments\":{\"bookId\":44,\"chapterIndex\":2,\"chapterTitle\":\"02、湖南农民运动考察报告\",\"selectedText\":\"好些中小地主、富农乃至中农\",\"selectedContext\":\"好些中小地主、富农乃至中农，从前反对农会的，此刻求入农会不可得。\"},\"reason\":\"用户问具体是谁，必须查看当前划词上下文。\"}],\"taskGoal\":\"判断资料是否给出具体身份\",\"maxSteps\":1,\"stopCondition\":\"取得当前页面上下文后停止\",\"answerGuidance\":\"只根据当前资料回答；没有姓名时说明资料没有给出具体姓名，不能编造。\",\"answerMode\":\"TEXT_ONLY\",\"evidenceStrictness\":\"STRICT\",\"answerRequirement\":{\"requiresConcreteExample\":false,\"requiresSpecificEntity\":true,\"requiresStorytelling\":false,\"requiresDetailedProcess\":false,\"avoidConceptualOpening\":false,\"avoidRepeatingPreviousExplanation\":false,\"allowModelKnowledge\":false,\"mustDistinguishTextEvidenceAndSupplement\":false,\"avoidRepeatingSourcePhrases\":false,\"minDetailLevel\":\"MEDIUM\"},\"planningReason\":\"问题要求具体人物，必须严格依据当前资料。\"}",
+    "mockFinalAnswer": "当前资料没有给出具体姓名，也没有给出某个村庄、日期或单一人物身份。这里的“好些中小地主、富农乃至中农”指的是一类人：他们从前反对农会，后来形势变化，又想求入农会却未必能被接纳。也就是说，原文记录的是一类现场和一类群体态度变化，不是某个可点名的具体人物。关键来源：当前阅读页面划词。"
+  }
+]

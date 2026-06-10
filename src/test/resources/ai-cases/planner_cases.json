@@ -1,0 +1,142 @@
+[
+  {
+    "caseId": "small_talk_001",
+    "caseName": "简单问候不调用工具",
+    "category": "SMALL_TALK",
+    "input": {
+      "userId": "11",
+      "bookId": 44,
+      "chapterIndex": 2,
+      "chapterTitle": "02、湖南农民运动考察报告",
+      "question": "你好",
+      "memoryEnabled": true,
+      "ragEnabled": true,
+      "externalMcpEnabled": false
+    },
+    "expectedPlan": {
+      "taskType": "SMALL_TALK",
+      "executionMode": "NO_TOOL",
+      "answerMode": "CONTEXT_ANCHORED_MODEL_KNOWLEDGE",
+      "toolPlanEmpty": true,
+      "mustNotUseTools": ["rag.search", "memory.search", "context.get_recent_dialogue", "context.get_current_page"]
+    },
+    "mockPlannerResponse": "{\"taskType\":\"SMALL_TALK\",\"subIntent\":\"NONE\",\"standaloneQuestion\":\"你好\",\"dependsOnContext\":false,\"executionMode\":\"NO_TOOL\",\"allowedTools\":[],\"toolPlan\":[],\"taskGoal\":\"回应问候\",\"maxSteps\":0,\"stopCondition\":\"不调用工具\",\"answerGuidance\":\"自然回应问候。\",\"answerMode\":\"CONTEXT_ANCHORED_MODEL_KNOWLEDGE\",\"evidenceStrictness\":\"LOOSE\",\"answerRequirement\":{\"requiresConcreteExample\":false,\"requiresSpecificEntity\":false,\"requiresStorytelling\":false,\"requiresDetailedProcess\":false,\"avoidConceptualOpening\":false,\"avoidRepeatingPreviousExplanation\":false,\"allowModelKnowledge\":true,\"mustDistinguishTextEvidenceAndSupplement\":false,\"avoidRepeatingSourcePhrases\":false,\"minDetailLevel\":\"LOW\"},\"planningReason\":\"用户只是问候。\"}"
+  },
+  {
+    "caseId": "current_page_001",
+    "caseName": "划词追问优先当前页面工具",
+    "category": "CURRENT_PAGE",
+    "input": {
+      "userId": "11",
+      "bookId": 44,
+      "chapterIndex": 2,
+      "chapterTitle": "02、湖南农民运动考察报告",
+      "question": "这里是什么意思？",
+      "selectedText": "机会主义",
+      "selectedContext": "这里说某些人对农民运动采取机会主义态度。",
+      "memoryEnabled": true,
+      "ragEnabled": true,
+      "externalMcpEnabled": false
+    },
+    "expectedPlan": {
+      "taskType": "READING_QA",
+      "executionModeAnyOf": ["SINGLE_TOOL", "MULTI_TOOL"],
+      "answerMode": "CONTEXT_ANCHORED_MODEL_KNOWLEDGE",
+      "mustUseToolsAnyOf": ["context.get_current_page"],
+      "requirements": {
+        "allowModelKnowledge": true,
+        "mustDistinguishTextEvidenceAndSupplement": true
+      }
+    },
+    "mockPlannerResponse": "{\"taskType\":\"READING_QA\",\"subIntent\":\"NONE\",\"standaloneQuestion\":\"解释当前划词‘机会主义’在上下文中的意思。\",\"dependsOnContext\":true,\"executionMode\":\"SINGLE_TOOL\",\"allowedTools\":[\"context.get_current_page\"],\"toolPlan\":[{\"toolName\":\"context.get_current_page\",\"arguments\":{\"bookId\":44,\"chapterIndex\":2,\"chapterTitle\":\"02、湖南农民运动考察报告\",\"selectedText\":\"机会主义\",\"selectedContext\":\"这里说某些人对农民运动采取机会主义态度。\"},\"reason\":\"用户问这里是什么意思，需要当前划词和上下文。\"}],\"taskGoal\":\"解释当前划词含义\",\"maxSteps\":1,\"stopCondition\":\"取得当前页面上下文后停止\",\"answerGuidance\":\"结合当前划词解释，必要时用常识辅助但区分资料和补充理解。\",\"answerMode\":\"CONTEXT_ANCHORED_MODEL_KNOWLEDGE\",\"evidenceStrictness\":\"MEDIUM\",\"answerRequirement\":{\"requiresConcreteExample\":false,\"requiresSpecificEntity\":false,\"requiresStorytelling\":false,\"requiresDetailedProcess\":false,\"avoidConceptualOpening\":false,\"avoidRepeatingPreviousExplanation\":false,\"allowModelKnowledge\":true,\"mustDistinguishTextEvidenceAndSupplement\":true,\"avoidRepeatingSourcePhrases\":false,\"minDetailLevel\":\"MEDIUM\"},\"planningReason\":\"这里指代当前划词，需要页面上下文。\"}"
+  },
+  {
+    "caseId": "concept_explain_001",
+    "caseName": "概念解释允许公共知识辅助",
+    "category": "CONCEPT_EXPLAIN",
+    "input": {
+      "userId": "11",
+      "bookId": 44,
+      "chapterIndex": 2,
+      "chapterTitle": "02、湖南农民运动考察报告",
+      "question": "为什么叫机会主义？",
+      "memoryEnabled": true,
+      "ragEnabled": true,
+      "externalMcpEnabled": false
+    },
+    "mockEvidence": {
+      "formattedEvidence": ""
+    },
+    "expectedPlan": {
+      "taskType": "READING_QA",
+      "executionModeAnyOf": ["SINGLE_TOOL", "MULTI_TOOL"],
+      "answerMode": "CONTEXT_ANCHORED_MODEL_KNOWLEDGE",
+      "evidenceStrictness": "MEDIUM",
+      "mustUseToolsAnyOf": ["rag.search"],
+      "requirements": {
+        "allowModelKnowledge": true,
+        "mustDistinguishTextEvidenceAndSupplement": true
+      }
+    },
+    "expectedAnswerRules": {
+      "mustContain": ["当前资料没有直接解释", "一般知识", "补充理解"],
+      "mustNotContain": ["只能拒答", "当前资料只支持概念解释"],
+      "requiredSemanticChecks": []
+    },
+    "mockPlannerResponse": "{\"taskType\":\"READING_QA\",\"subIntent\":\"NONE\",\"standaloneQuestion\":\"为什么叫机会主义？\",\"dependsOnContext\":true,\"executionMode\":\"SINGLE_TOOL\",\"allowedTools\":[\"rag.search\"],\"toolPlan\":[{\"toolName\":\"rag.search\",\"arguments\":{\"bookId\":44,\"chapterIndex\":2,\"query\":\"为什么叫机会主义\",\"topK\":5},\"reason\":\"用户询问当前阅读中的概念，需要检索书籍证据。\"}],\"taskGoal\":\"解释机会主义命名原因\",\"maxSteps\":1,\"stopCondition\":\"完成 RAG 检索后停止\",\"answerGuidance\":\"如果资料没有直接解释，可以基于一般知识辅助理解，但要区分原文证据和补充理解。\",\"answerMode\":\"CONTEXT_ANCHORED_MODEL_KNOWLEDGE\",\"evidenceStrictness\":\"MEDIUM\",\"answerRequirement\":{\"requiresConcreteExample\":false,\"requiresSpecificEntity\":false,\"requiresStorytelling\":false,\"requiresDetailedProcess\":false,\"avoidConceptualOpening\":false,\"avoidRepeatingPreviousExplanation\":false,\"allowModelKnowledge\":true,\"mustDistinguishTextEvidenceAndSupplement\":true,\"avoidRepeatingSourcePhrases\":false,\"minDetailLevel\":\"MEDIUM\"},\"planningReason\":\"概念解释需要证据锚定，也允许常识辅助。\"}",
+    "mockFinalAnswer": "当前资料没有直接解释“为什么叫机会主义”，下面是基于一般知识的辅助理解：它之所以叫机会主义，是因为这种态度不是按稳定原则判断事情，而是看眼前哪边有利就靠向哪边。补充理解是：这里的公共知识解释不等于原文直接证据，只是帮助理解这个词为什么和“机会”有关。关键来源：当前未收集到足够证据；以上为一般知识辅助理解。"
+  },
+  {
+    "caseId": "github_search_001",
+    "caseName": "GitHub MCP 可用时进入 BOUNDED_REACT",
+    "category": "EXTERNAL_MCP",
+    "input": {
+      "userId": "11",
+      "bookId": 44,
+      "chapterIndex": 2,
+      "question": "使用 GitHub 搜索 httpreading 的项目",
+      "memoryEnabled": true,
+      "ragEnabled": true,
+      "externalMcpEnabled": true
+    },
+    "mcpServers": [
+      {
+        "name": "github",
+        "description": "GitHub 仓库资料",
+        "allowedTools": ["search_repositories", "get_file_contents"]
+      }
+    ],
+    "expectedPlan": {
+      "taskType": "TOOL_ACTION",
+      "executionMode": "BOUNDED_REACT",
+      "allowedTools": ["mcp.server:github"],
+      "toolPlanEmpty": true,
+      "answerMode": "EXTERNAL_SEARCH_REQUIRED",
+      "mustNotUseTools": ["rag.search", "memory.search"]
+    },
+    "mockPlannerResponse": "{\"taskType\":\"TOOL_ACTION\",\"subIntent\":\"NONE\",\"standaloneQuestion\":\"使用 GitHub 搜索 httpreading 的项目\",\"dependsOnContext\":false,\"executionMode\":\"BOUNDED_REACT\",\"allowedTools\":[\"mcp.server:github\"],\"toolPlan\":[],\"taskGoal\":\"使用 GitHub MCP server 搜索项目并取得证据\",\"maxSteps\":5,\"stopCondition\":\"ReAct agent 获得足够 GitHub 证据或需要用户确认时停止\",\"answerGuidance\":\"严格依据 GitHub MCP 工具结果回答；不要把记忆或 RAG 说成 GitHub 搜索结果。\",\"answerMode\":\"EXTERNAL_SEARCH_REQUIRED\",\"evidenceStrictness\":\"STRICT\",\"answerRequirement\":{\"requiresConcreteExample\":false,\"requiresSpecificEntity\":true,\"requiresStorytelling\":false,\"requiresDetailedProcess\":false,\"avoidConceptualOpening\":false,\"avoidRepeatingPreviousExplanation\":false,\"allowModelKnowledge\":false,\"mustDistinguishTextEvidenceAndSupplement\":false,\"avoidRepeatingSourcePhrases\":false,\"minDetailLevel\":\"MEDIUM\"},\"planningReason\":\"GitHub server 可用，一级 Planner 只选择 server。\"}"
+  },
+  {
+    "caseId": "github_search_no_server_001",
+    "caseName": "GitHub MCP 不可用时不能用阅读工具凑数",
+    "category": "EXTERNAL_MCP",
+    "input": {
+      "userId": "11",
+      "bookId": 44,
+      "chapterIndex": 2,
+      "question": "使用 GitHub 搜索 httpreading 的项目",
+      "memoryEnabled": true,
+      "ragEnabled": true,
+      "externalMcpEnabled": true
+    },
+    "mcpServers": [],
+    "expectedPlan": {
+      "executionMode": "NO_TOOL",
+      "toolPlanEmpty": true,
+      "answerMode": "EXTERNAL_SEARCH_REQUIRED",
+      "answerGuidanceContains": "没有可用的 GitHub/外部搜索工具",
+      "mustNotUseTools": ["rag.search", "memory.search"]
+    },
+    "mockPlannerResponse": "{\"taskType\":\"READING_QA\",\"subIntent\":\"NONE\",\"standaloneQuestion\":\"使用 GitHub 搜索 httpreading 的项目\",\"dependsOnContext\":true,\"executionMode\":\"MULTI_TOOL\",\"allowedTools\":[\"memory.search\",\"rag.search\"],\"toolPlan\":[{\"toolName\":\"memory.search\",\"arguments\":{\"userId\":\"11\",\"sessionId\":\"book_44_chapter_2\",\"query\":\"httpreading github\",\"limit\":5},\"reason\":\"错误地用记忆替代 GitHub 搜索\"},{\"toolName\":\"rag.search\",\"arguments\":{\"bookId\":44,\"chapterIndex\":2,\"query\":\"httpreading github\",\"topK\":5},\"reason\":\"错误地用 RAG 替代 GitHub 搜索\"}],\"taskGoal\":\"错误规划\",\"maxSteps\":2,\"stopCondition\":\"完成\",\"answerGuidance\":\"错误规划\",\"answerMode\":\"TEXT_ONLY\",\"evidenceStrictness\":\"STRICT\",\"answerRequirement\":{\"requiresConcreteExample\":false,\"requiresSpecificEntity\":false,\"requiresStorytelling\":false,\"requiresDetailedProcess\":false,\"avoidConceptualOpening\":false,\"avoidRepeatingPreviousExplanation\":false,\"allowModelKnowledge\":false,\"mustDistinguishTextEvidenceAndSupplement\":false,\"avoidRepeatingSourcePhrases\":false,\"minDetailLevel\":\"MEDIUM\"},\"planningReason\":\"错误规划\"}"
+  }
+]
