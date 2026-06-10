@@ -1,12 +1,13 @@
 package com.example.httpreading.ai;
 
 import static org.junit.jupiter.api.Assertions.fail;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -15,8 +16,6 @@ import com.example.httpreading.dto.AiChatRequest;
 import com.example.httpreading.mcp.ExternalMcpClientService;
 import com.example.httpreading.service.ModelClient;
 import com.example.httpreading.service.ai.ChatPlan;
-import com.example.httpreading.service.ai.CollectedEvidence;
-import com.example.httpreading.service.ai.FinalAnswerService;
 import com.example.httpreading.service.ai.PlanValidator;
 import com.example.httpreading.service.ai.PlannerPromptBuilder;
 import com.example.httpreading.service.ai.PlannerService;
@@ -25,7 +24,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
-class AiCaseRunnerTest {
+class AiPlannerLiveCaseTest {
     private static final List<String> CASE_FILES = List.of(
         "ai-cases/planner_cases.json",
         "ai-cases/final_answer_cases.json",
@@ -34,16 +33,21 @@ class AiCaseRunnerTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
-    void aiCasesPass() throws IOException {
-        List<AiCaseSpec> cases = loadCases();
+    void livePlannerMatchesExpectedPlan() throws Exception {
+        assumeTrue(Boolean.getBoolean("ai.live"),
+            "Live AI cases are disabled by default. Run with -Dai.live=true to enable.");
+
+        List<AiCaseSpec> cases = loadCases().stream()
+            .filter(spec -> spec.expectedPlan != null)
+            .toList();
         List<AiCaseAssertions.AiCaseFailure> failures = new ArrayList<>();
         int passed = 0;
 
         for (AiCaseSpec spec : cases) {
-            if (!isMockedMode(spec)) {
-                continue;
-            }
-            List<AiCaseAssertions.AiCaseFailure> caseFailures = runCase(spec);
+            ExternalMcpClientService externalMcpClientService = externalMcpClientService(spec.mcpServers);
+            PlannerService plannerService = plannerService(externalMcpClientService);
+            ChatPlan plan = plannerService.plan(request(spec.input));
+            List<AiCaseAssertions.AiCaseFailure> caseFailures = AiCaseAssertions.assertPlanMatches(spec, plan);
             if (caseFailures.isEmpty()) {
                 passed++;
             } else {
@@ -52,58 +56,28 @@ class AiCaseRunnerTest {
         }
 
         if (!failures.isEmpty()) {
-            fail(report(mockedCaseCount(cases), passed, failures));
+            fail(report(cases.size(), passed, failures));
         }
-        System.out.println(report(mockedCaseCount(cases), passed, failures));
+        System.out.println(report(cases.size(), passed, failures));
     }
 
-    private List<AiCaseAssertions.AiCaseFailure> runCase(AiCaseSpec spec) {
-        List<AiCaseAssertions.AiCaseFailure> failures = new ArrayList<>();
-        AiChatRequest request = request(spec.input);
-        ExternalMcpClientService externalMcpClientService = externalMcpClientService(spec.mcpServers);
-        PlannerService plannerService = plannerService(spec, externalMcpClientService);
-        ChatPlan plan = plannerService.plan(request);
-
-        failures.addAll(AiCaseAssertions.assertPlanMatches(spec, plan));
-
-        if (spec.expectedAnswerRules != null) {
-            CollectedEvidence evidence = TestEvidenceFactory.from(spec.mockEvidence);
-            FinalAnswerService finalAnswerService = finalAnswerService(spec);
-            String answer = finalAnswerService.answer(request, plan, evidence);
-            failures.addAll(AiCaseAssertions.assertAnswerMatches(spec, answer, evidence));
-        }
-        return failures;
-    }
-
-    private PlannerService plannerService(AiCaseSpec spec, ExternalMcpClientService externalMcpClientService) {
+    private PlannerService plannerService(ExternalMcpClientService externalMcpClientService) throws Exception {
         ToolRegistry toolRegistry = new ToolRegistry();
         return new PlannerService(
-            modelClient(spec.mockPlannerResponse),
+            liveModelClient(),
             objectMapper,
             new PlannerPromptBuilder(toolRegistry, externalMcpClientService),
             new PlanValidator(toolRegistry, externalMcpClientService),
             externalMcpClientService);
     }
 
-    private FinalAnswerService finalAnswerService(AiCaseSpec spec) {
-        return new FinalAnswerService(finalAnswerModelClient(spec));
-    }
-
-    private ModelClient modelClient(String response) {
-        ModelClient modelClient = mock(ModelClient.class);
-        when(modelClient.chat(anyString())).thenReturn(response == null ? "" : response);
-        return modelClient;
-    }
-
-    private ModelClient finalAnswerModelClient(AiCaseSpec spec) {
-        if (spec.mockFinalAnswers != null && !spec.mockFinalAnswers.isEmpty()) {
-            ModelClient modelClient = mock(ModelClient.class);
-            String first = spec.mockFinalAnswers.get(0);
-            List<String> rest = spec.mockFinalAnswers.subList(1, spec.mockFinalAnswers.size());
-            when(modelClient.chat(anyString())).thenReturn(first, rest.toArray(String[]::new));
-            return modelClient;
+    private ModelClient liveModelClient() throws Exception {
+        ModelClient modelClient = new ModelClient();
+        String apiKey = firstNonBlank(System.getProperty("model.apiKey"), System.getenv("MODEL_API_KEY"));
+        if (!apiKey.isBlank()) {
+            setField(modelClient, "apiKey", apiKey);
         }
-        return modelClient(spec.mockFinalAnswer);
+        return modelClient;
     }
 
     private ExternalMcpClientService externalMcpClientService(List<Map<String, Object>> routableServers) {
@@ -147,9 +121,24 @@ class AiCaseRunnerTest {
         return inputStream;
     }
 
+    private void setField(Object target, String fieldName, Object value) throws Exception {
+        Field field = target.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        field.set(target, value);
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
+    }
+
     private String report(int total, int passed, List<AiCaseAssertions.AiCaseFailure> failures) {
         StringBuilder report = new StringBuilder()
-            .append("\n[AI_CASE_REPORT]\n")
+            .append("\n[AI_PLANNER_LIVE_CASE_REPORT]\n")
             .append("total=").append(total).append('\n')
             .append("passed=").append(passed).append('\n')
             .append("failed=").append(failures.size()).append('\n');
@@ -157,13 +146,5 @@ class AiCaseRunnerTest {
             report.append('\n').append(failure.reportText());
         }
         return report.toString();
-    }
-
-    private boolean isMockedMode(AiCaseSpec spec) {
-        return spec.mode == null || spec.mode.isBlank() || "MOCKED".equals(spec.mode);
-    }
-
-    private int mockedCaseCount(List<AiCaseSpec> cases) {
-        return (int) cases.stream().filter(this::isMockedMode).count();
     }
 }

@@ -20,7 +20,7 @@ final class TestEvidenceFactory {
             safeList(spec.memoryRefs),
             safeList(spec.externalMcpRefs),
             safeList(spec.externalMcpPlanRefs),
-            spec.formattedEvidence);
+            spec.formattedEvidence == null ? "" : spec.formattedEvidence);
     }
 
     private static List<EvidenceItem> evidenceItems(List<Map<String, Object>> items) {

@@ -7,6 +7,8 @@ class AiCaseSpec {
     public String caseId;
     public String caseName;
     public String category;
+    public String mode;
+    public String casePurpose;
     public AiCaseInput input;
     public MockEvidence mockEvidence;
     public ExpectedPlan expectedPlan;
@@ -14,6 +16,7 @@ class AiCaseSpec {
     public List<Map<String, Object>> mcpServers;
     public String mockPlannerResponse;
     public String mockFinalAnswer;
+    public List<String> mockFinalAnswers;
 
     static class AiCaseInput {
         public String userId;
@@ -49,6 +52,7 @@ class AiCaseSpec {
         public List<String> evidenceStrictnessAnyOf;
         public List<String> allowedTools;
         public List<String> mustUseToolsAnyOf;
+        public List<String> mustUseToolsAllOf;
         public List<String> mustNotUseTools;
         public Boolean toolPlanEmpty;
         public String answerGuidanceContains;

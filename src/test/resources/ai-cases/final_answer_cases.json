@@ -104,5 +104,59 @@
     },
     "mockPlannerResponse": "{\"taskType\":\"READING_QA\",\"subIntent\":\"CONCRETE_EXAMPLE\",\"standaloneQuestion\":\"不要重复上一轮概念解释，直接给出农民为什么重要的例子或说明证据不足。\",\"dependsOnContext\":true,\"executionMode\":\"SINGLE_TOOL\",\"allowedTools\":[\"context.get_recent_dialogue\"],\"toolPlan\":[{\"toolName\":\"context.get_recent_dialogue\",\"arguments\":{\"userId\":\"11\",\"sessionId\":\"book_44_chapter_2\",\"limit\":5},\"reason\":\"用户明确要求不要重复，需要最近对话判断上一轮内容。\"}],\"taskGoal\":\"直接举例或说明证据不足\",\"maxSteps\":1,\"stopCondition\":\"取得最近对话后停止\",\"answerGuidance\":\"不要重复上一轮概念解释；直接进入例子，如果当前资料没有具名案例，就说明证据不足。\",\"answerMode\":\"CONTEXT_ANCHORED_MODEL_KNOWLEDGE\",\"evidenceStrictness\":\"MEDIUM\",\"answerRequirement\":{\"requiresConcreteExample\":true,\"requiresSpecificEntity\":false,\"requiresStorytelling\":false,\"requiresDetailedProcess\":false,\"avoidConceptualOpening\":true,\"avoidRepeatingPreviousExplanation\":true,\"allowModelKnowledge\":true,\"mustDistinguishTextEvidenceAndSupplement\":true,\"avoidRepeatingSourcePhrases\":false,\"minDetailLevel\":\"MEDIUM\"},\"planningReason\":\"用户是在追问并要求不要重复概念，应直接处理新增要求。\"}",
     "mockFinalAnswer": "直接看例子：当前资料没有给出具名案例，所以不能硬编某个村、某个人的故事；但可以用一个贴着资料的场景来说明。比如一个农户长期被税费、劳务和地方摊派压着，平时只觉得日子苦，等农会把大家组织起来，他就从单独忍受变成能集体表达诉求的人。这个例子不是原文中的具名案例，而是基于当前资料线索的辅助场景。关键来源：最近对话和当前资料线索。"
+  },
+  {
+    "caseId": "repair_flow_001",
+    "caseName": "故事回答不合格时触发修复",
+    "category": "REPAIR_FLOW",
+    "mode": "MOCKED",
+    "casePurpose": "REPAIR_FLOW",
+    "input": {
+      "userId": "11",
+      "bookId": 44,
+      "chapterIndex": 2,
+      "chapterTitle": "02、湖南农民运动考察报告",
+      "question": "有没有真实发生的故事？",
+      "selectedText": "好些中小地主、富农乃至中农，从前反对农会的，此刻求入农会不可得",
+      "selectedContext": "农民这样回答。好些中小地主、富农乃至中农，从前反对农会的，此刻求入农会不可得。我到各处，常常遇到这种人，这样向我求情：“请省里来的委员作保！”",
+      "memoryEnabled": true,
+      "ragEnabled": true,
+      "externalMcpEnabled": false
+    },
+    "mockEvidence": {
+      "formattedEvidence": "已收集证据：\n【证据1】当前阅读页面划词\n好些中小地主、富农乃至中农，从前反对农会的，此刻求入农会不可得。我到各处，常常遇到这种人，这样向我求情：“请省里来的委员作保！”",
+      "items": [
+        {
+          "id": "current-page-1",
+          "type": "current_page",
+          "source": "当前阅读页面划词",
+          "content": "好些中小地主、富农乃至中农，从前反对农会的，此刻求入农会不可得。我到各处，常常遇到这种人，这样向我求情：“请省里来的委员作保！”",
+          "priority": 10,
+          "relevance": 1.0
+        }
+      ],
+      "sources": ["当前阅读页面划词"]
+    },
+    "expectedPlan": {
+      "taskType": "READING_QA",
+      "subIntent": "STORYTELLING_CASE",
+      "answerMode": "CONTEXT_ANCHORED_MODEL_KNOWLEDGE",
+      "mustUseToolsAllOf": ["context.get_current_page", "rag.search"],
+      "requirements": {
+        "requiresConcreteExample": true,
+        "requiresStorytelling": true,
+        "requiresDetailedProcess": true
+      }
+    },
+    "expectedAnswerRules": {
+      "mustContain": ["当前资料没有给出具体姓名", "从前反对农会", "后来求入农会", "作保", "不轻易接纳", "对应原文观点"],
+      "mustNotContain": ["原文提到存在这种情况，这反映了阶级矛盾。", "张三", "某某村"],
+      "requiredSemanticChecks": ["必须讲出故事过程"]
+    },
+    "mockPlannerResponse": "{\"taskType\":\"READING_QA\",\"subIntent\":\"STORYTELLING_CASE\",\"standaloneQuestion\":\"结合当前划词，讲出原文支持的故事过程。\",\"dependsOnContext\":true,\"executionMode\":\"MULTI_TOOL\",\"allowedTools\":[\"context.get_current_page\",\"rag.search\"],\"toolPlan\":[{\"toolName\":\"context.get_current_page\",\"arguments\":{\"bookId\":44,\"chapterIndex\":2,\"chapterTitle\":\"02、湖南农民运动考察报告\",\"selectedText\":\"好些中小地主、富农乃至中农，从前反对农会的，此刻求入农会不可得\",\"selectedContext\":\"农民这样回答。好些中小地主、富农乃至中农，从前反对农会的，此刻求入农会不可得。我到各处，常常遇到这种人，这样向我求情：“请省里来的委员作保！”\"},\"reason\":\"需要当前划词线索。\"},{\"toolName\":\"rag.search\",\"arguments\":{\"bookId\":44,\"chapterIndex\":2,\"query\":\"从前反对农会 求入农会 作保 故事过程\",\"topK\":5},\"reason\":\"补充同章证据，避免编造。\"}],\"taskGoal\":\"讲故事过程\",\"maxSteps\":2,\"stopCondition\":\"完成证据检索后停止\",\"answerGuidance\":\"必须讲出从前、后来、作保、不轻易接纳和对应原文观点；没有具体姓名时说明不能编造。\",\"answerMode\":\"CONTEXT_ANCHORED_MODEL_KNOWLEDGE\",\"evidenceStrictness\":\"MEDIUM\",\"answerRequirement\":{\"requiresConcreteExample\":true,\"requiresSpecificEntity\":true,\"requiresStorytelling\":true,\"requiresDetailedProcess\":true,\"avoidConceptualOpening\":true,\"avoidRepeatingPreviousExplanation\":false,\"allowModelKnowledge\":true,\"mustDistinguishTextEvidenceAndSupplement\":true,\"avoidRepeatingSourcePhrases\":false,\"minDetailLevel\":\"HIGH\"},\"planningReason\":\"故事追问需要当前页面和 RAG 证据。\"}",
+    "mockFinalAnswers": [
+      "原文提到存在这种情况，这反映了阶级矛盾。",
+      "当前资料没有给出具体姓名，所以不能编造某个具体人。这个故事过程可以这样讲：从前反对农会的中小地主、富农乃至中农，原先站在农会外面；后来求入农会，是因为农会力量起来，他们转而想加入，甚至去求情、请委员作保。可是原文说此刻求入农会不可得，说明农会对这些从前反对者不轻易接纳。这个过程对应原文观点：乡村权力已经发生变化，过去反对农会的人不得不重新站队。关键来源：当前阅读页面划词。"
+    ]
   }
 ]

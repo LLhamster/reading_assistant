@@ -38,7 +38,9 @@ final class AiCaseAssertions {
                 List.of(), plan.toolPlan()));
         }
         checkMustUseAnyTool(failures, spec, plan, expected.mustUseToolsAnyOf);
+        checkMustUseAllTools(failures, spec, plan, expected.mustUseToolsAllOf);
         checkMustNotUseTools(failures, spec, plan, expected.mustNotUseTools);
+        checkBoundedReact(failures, spec, plan);
         if (expected.answerGuidanceContains != null
             && !plan.answerGuidance().contains(expected.answerGuidanceContains)) {
             failures.add(failure(spec, "PLANNER", "answerGuidance missing text: "
@@ -104,6 +106,52 @@ final class AiCaseAssertions {
         }
     }
 
+    private static void checkMustUseAllTools(List<AiCaseFailure> failures,
+                                             AiCaseSpec spec,
+                                             ChatPlan plan,
+                                             List<String> expectedTools) {
+        if (expectedTools == null || expectedTools.isEmpty()) {
+            return;
+        }
+        List<String> actualTools = plan.toolPlan().stream().map(ToolStep::toolName).toList();
+        List<String> missing = expectedTools.stream()
+            .filter(tool -> !actualTools.contains(tool))
+            .toList();
+        if (!missing.isEmpty()) {
+            failures.add(failure(spec, "PLANNER", "toolPlan missing required tools",
+                expectedTools, actualTools));
+        }
+    }
+
+    private static void checkBoundedReact(List<AiCaseFailure> failures, AiCaseSpec spec, ChatPlan plan) {
+        if (!"BOUNDED_REACT".equals(plan.executionMode().name())) {
+            return;
+        }
+        if (plan.allowedTools().size() != 1) {
+            failures.add(failure(spec, "PLANNER",
+                "BOUNDED_REACT must allow exactly one mcp.server token",
+                "one mcp.server token", plan.allowedTools()));
+            return;
+        }
+        String serverToken = plan.allowedTools().get(0);
+        if (!serverToken.startsWith("mcp.server:")) {
+            failures.add(failure(spec, "PLANNER",
+                "BOUNDED_REACT allowedTools[0] must start with mcp.server:",
+                "mcp.server:<serverName>", serverToken));
+        }
+        if (!plan.toolPlan().isEmpty()) {
+            failures.add(failure(spec, "PLANNER",
+                "BOUNDED_REACT toolPlan must be empty",
+                List.of(), plan.toolPlan()));
+        }
+        boolean hasLocalTool = plan.allowedTools().stream().anyMatch(tool -> !tool.startsWith("mcp.server:"));
+        if (hasLocalTool) {
+            failures.add(failure(spec, "PLANNER",
+                "BOUNDED_REACT cannot mix local tools into allowedTools",
+                "only mcp.server token", plan.allowedTools()));
+        }
+    }
+
     private static void checkRequirements(List<AiCaseFailure> failures,
                                           AiCaseSpec spec,
                                           AnswerRequirement actual,
@@ -140,9 +188,26 @@ final class AiCaseAssertions {
                 return "回答可能只是复述原文，没有形成解释或叙事。";
             }
         }
-        if (check.contains("必须讲出故事过程")
-            && !text.matches(".*(从前|后来|此刻|先|再|于是|结果|过程|变化).*")) {
-            return "回答缺少故事过程链条。";
+        if (check.contains("必须讲出故事过程")) {
+            int storySignals = 0;
+            if (text.matches(".*(从前|原先|一开始|最初|本来).*")) {
+                storySignals++;
+            }
+            if (text.matches(".*(后来|此刻|转而|局势变化|农会力量).*")) {
+                storySignals++;
+            }
+            if (text.matches(".*(求入农会|求情|作保|请委员作保).*")) {
+                storySignals++;
+            }
+            if (text.matches(".*(不可得|不被接纳|不轻易接纳|拒绝).*")) {
+                storySignals++;
+            }
+            if (text.matches(".*(说明|体现|对应|乡村权力|重新站队).*")) {
+                storySignals++;
+            }
+            if (storySignals < 4) {
+                return "回答缺少故事过程链条，故事信号只命中 " + storySignals + "/5 类。";
+            }
         }
         if (check.contains("必须说明没有具体姓名")
             && !text.matches(".*(没有|未给出|缺少).*?(具体姓名|姓名|村庄|日期).*")) {
