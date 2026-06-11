@@ -31,10 +31,10 @@ public class McpToolOrchestrator {
             return ToolExecutionResult.completed(List.of(), planRefs(plan, "NO_TOOL"));
         }
         if (plan.executionMode() == ToolExecutionMode.BOUNDED_REACT) {
-            if (!request.isExternalMcpEnabled()) {
+            String selectedServerName = selectedMcpServerName(plan);
+            if (!request.isExternalMcpEnabled() && !"self-local".equals(selectedServerName)) {
                 return ToolExecutionResult.completed(List.of(), planRefs(plan, "BOUNDED_REACT_SKIPPED external MCP disabled"));
             }
-            String selectedServerName = selectedMcpServerName(plan);
             ExternalMcpAgentResult agentResult = selectedServerName.isBlank()
                 ? externalMcpAgentService.execute(request, planningContext(plan))
                 : externalMcpAgentService.execute(request, planningContext(plan), selectedServerName);

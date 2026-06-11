@@ -60,7 +60,8 @@ public class PlanValidator {
         List<String> allowedTools = response.allowedTools();
         List<LlmToolStep> toolPlan = response.toolPlan();
         validateMode(executionMode, maxSteps, toolPlan);
-        validateIntentConsistency(originalQuestion, standaloneQuestion, taskType, answerMode, dependsOnContext, toolPlan);
+        validateIntentConsistency(originalQuestion, standaloneQuestion, taskType, answerMode, dependsOnContext,
+            allowedTools, toolPlan);
         validateTools(executionMode, allowedTools, toolPlan);
 
         List<ToolStep> steps = toolPlan.stream()
@@ -149,12 +150,16 @@ public class PlanValidator {
                                            PlannerTaskType taskType,
                                            AnswerMode answerMode,
                                            boolean dependsOnContext,
+                                           List<String> allowedTools,
                                            List<LlmToolStep> toolPlan) {
         boolean externalRequired = PlannerIntentClassifier.requiresUnavailableExternalTool(originalQuestion)
             || PlannerIntentClassifier.requiresUnavailableExternalTool(standaloneQuestion);
         if (externalRequired) {
             if (usesAnyTool(toolPlan, "rag.search", "memory.search", "context.get_current_page")) {
                 throw new PlanValidationException("external/realtime request cannot be answered by reading or memory tools");
+            }
+            if (allowedTools.stream().anyMatch("mcp.server:self-local"::equals)) {
+                throw new PlanValidationException("external/realtime request cannot use self-local MCP server");
             }
         }
         if (PlannerIntentClassifier.requiresRealtimeExternalFact(originalQuestion) && answerMode == AnswerMode.TEXT_ONLY) {

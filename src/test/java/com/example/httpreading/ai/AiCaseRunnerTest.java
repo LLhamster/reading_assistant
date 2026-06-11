@@ -108,8 +108,20 @@ class AiCaseRunnerTest {
 
     private ExternalMcpClientService externalMcpClientService(List<Map<String, Object>> routableServers) {
         ExternalMcpClientService service = mock(ExternalMcpClientService.class);
-        when(service.routableServers()).thenReturn(routableServers == null ? List.of() : routableServers);
+        when(service.routableServers()).thenReturn(routableServers == null ? List.of(selfLocalServer()) : routableServers);
         return service;
+    }
+
+    private Map<String, Object> selfLocalServer() {
+        return Map.of(
+            "name", "self-local",
+            "description", "本项目内部阅读系统能力",
+            "allowedTools", List.of(
+                "memory_search",
+                "rag_retrieve",
+                "context_get_recent_dialogue",
+                "context_get_current_page",
+                "context_build"));
     }
 
     private AiChatRequest request(AiCaseSpec.AiCaseInput input) {

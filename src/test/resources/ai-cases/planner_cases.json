@@ -40,15 +40,16 @@
     },
     "expectedPlan": {
       "taskType": "READING_QA",
-      "executionModeAnyOf": ["SINGLE_TOOL", "MULTI_TOOL"],
+      "executionMode": "BOUNDED_REACT",
       "answerMode": "CONTEXT_ANCHORED_MODEL_KNOWLEDGE",
-      "mustUseToolsAnyOf": ["context.get_current_page"],
+      "allowedTools": ["mcp.server:self-local"],
+      "toolPlanEmpty": true,
       "requirements": {
         "allowModelKnowledge": true,
         "mustDistinguishTextEvidenceAndSupplement": true
       }
     },
-    "mockPlannerResponse": "{\"taskType\":\"READING_QA\",\"subIntent\":\"NONE\",\"standaloneQuestion\":\"解释当前划词‘机会主义’在上下文中的意思。\",\"dependsOnContext\":true,\"executionMode\":\"SINGLE_TOOL\",\"allowedTools\":[\"context.get_current_page\"],\"toolPlan\":[{\"toolName\":\"context.get_current_page\",\"arguments\":{\"bookId\":44,\"chapterIndex\":2,\"chapterTitle\":\"02、湖南农民运动考察报告\",\"selectedText\":\"机会主义\",\"selectedContext\":\"这里说某些人对农民运动采取机会主义态度。\"},\"reason\":\"用户问这里是什么意思，需要当前划词和上下文。\"}],\"taskGoal\":\"解释当前划词含义\",\"maxSteps\":1,\"stopCondition\":\"取得当前页面上下文后停止\",\"answerGuidance\":\"结合当前划词解释，必要时用常识辅助但区分资料和补充理解。\",\"answerMode\":\"CONTEXT_ANCHORED_MODEL_KNOWLEDGE\",\"evidenceStrictness\":\"MEDIUM\",\"answerRequirement\":{\"requiresConcreteExample\":false,\"requiresSpecificEntity\":false,\"requiresStorytelling\":false,\"requiresDetailedProcess\":false,\"avoidConceptualOpening\":false,\"avoidRepeatingPreviousExplanation\":false,\"allowModelKnowledge\":true,\"mustDistinguishTextEvidenceAndSupplement\":true,\"avoidRepeatingSourcePhrases\":false,\"minDetailLevel\":\"MEDIUM\"},\"planningReason\":\"这里指代当前划词，需要页面上下文。\"}"
+    "mockPlannerResponse": "{\"taskType\":\"READING_QA\",\"subIntent\":\"NONE\",\"standaloneQuestion\":\"解释当前划词‘机会主义’在上下文中的意思。\",\"dependsOnContext\":true,\"executionMode\":\"BOUNDED_REACT\",\"allowedTools\":[\"mcp.server:self-local\"],\"toolPlan\":[],\"taskGoal\":\"让 self-local MCP server 获取当前页面或划词上下文证据\",\"maxSteps\":5,\"stopCondition\":\"ReAct agent 获得足够当前页面证据后停止\",\"answerGuidance\":\"结合当前划词解释，必要时用常识辅助但区分资料和补充理解。\",\"answerMode\":\"CONTEXT_ANCHORED_MODEL_KNOWLEDGE\",\"evidenceStrictness\":\"MEDIUM\",\"answerRequirement\":{\"requiresConcreteExample\":false,\"requiresSpecificEntity\":false,\"requiresStorytelling\":false,\"requiresDetailedProcess\":false,\"avoidConceptualOpening\":false,\"avoidRepeatingPreviousExplanation\":false,\"allowModelKnowledge\":true,\"mustDistinguishTextEvidenceAndSupplement\":true,\"avoidRepeatingSourcePhrases\":false,\"minDetailLevel\":\"MEDIUM\"},\"planningReason\":\"这里指代当前划词，需要 self-local server 内的 context 能力。\"}"
   },
   {
     "caseId": "concept_explain_001",
@@ -69,10 +70,11 @@
     },
     "expectedPlan": {
       "taskType": "READING_QA",
-      "executionModeAnyOf": ["SINGLE_TOOL", "MULTI_TOOL"],
+      "executionMode": "BOUNDED_REACT",
       "answerMode": "CONTEXT_ANCHORED_MODEL_KNOWLEDGE",
       "evidenceStrictness": "MEDIUM",
-      "mustUseToolsAnyOf": ["rag.search"],
+      "allowedTools": ["mcp.server:self-local"],
+      "toolPlanEmpty": true,
       "requirements": {
         "allowModelKnowledge": true,
         "mustDistinguishTextEvidenceAndSupplement": true
@@ -83,7 +85,7 @@
       "mustNotContain": ["只能拒答", "当前资料只支持概念解释"],
       "requiredSemanticChecks": []
     },
-    "mockPlannerResponse": "{\"taskType\":\"READING_QA\",\"subIntent\":\"NONE\",\"standaloneQuestion\":\"为什么叫机会主义？\",\"dependsOnContext\":true,\"executionMode\":\"SINGLE_TOOL\",\"allowedTools\":[\"rag.search\"],\"toolPlan\":[{\"toolName\":\"rag.search\",\"arguments\":{\"bookId\":44,\"chapterIndex\":2,\"query\":\"为什么叫机会主义\",\"topK\":5},\"reason\":\"用户询问当前阅读中的概念，需要检索书籍证据。\"}],\"taskGoal\":\"解释机会主义命名原因\",\"maxSteps\":1,\"stopCondition\":\"完成 RAG 检索后停止\",\"answerGuidance\":\"如果资料没有直接解释，可以基于一般知识辅助理解，但要区分原文证据和补充理解。\",\"answerMode\":\"CONTEXT_ANCHORED_MODEL_KNOWLEDGE\",\"evidenceStrictness\":\"MEDIUM\",\"answerRequirement\":{\"requiresConcreteExample\":false,\"requiresSpecificEntity\":false,\"requiresStorytelling\":false,\"requiresDetailedProcess\":false,\"avoidConceptualOpening\":false,\"avoidRepeatingPreviousExplanation\":false,\"allowModelKnowledge\":true,\"mustDistinguishTextEvidenceAndSupplement\":true,\"avoidRepeatingSourcePhrases\":false,\"minDetailLevel\":\"MEDIUM\"},\"planningReason\":\"概念解释需要证据锚定，也允许常识辅助。\"}",
+    "mockPlannerResponse": "{\"taskType\":\"READING_QA\",\"subIntent\":\"NONE\",\"standaloneQuestion\":\"为什么叫机会主义？\",\"dependsOnContext\":true,\"executionMode\":\"BOUNDED_REACT\",\"allowedTools\":[\"mcp.server:self-local\"],\"toolPlan\":[],\"taskGoal\":\"让 self-local MCP server 检索阅读证据并判断是否需要常识辅助\",\"maxSteps\":5,\"stopCondition\":\"ReAct agent 获得足够阅读证据或确认资料无直接解释后停止\",\"answerGuidance\":\"如果资料没有直接解释，可以基于一般知识辅助理解，但要区分原文证据和补充理解。\",\"answerMode\":\"CONTEXT_ANCHORED_MODEL_KNOWLEDGE\",\"evidenceStrictness\":\"MEDIUM\",\"answerRequirement\":{\"requiresConcreteExample\":false,\"requiresSpecificEntity\":false,\"requiresStorytelling\":false,\"requiresDetailedProcess\":false,\"avoidConceptualOpening\":false,\"avoidRepeatingPreviousExplanation\":false,\"allowModelKnowledge\":true,\"mustDistinguishTextEvidenceAndSupplement\":true,\"avoidRepeatingSourcePhrases\":false,\"minDetailLevel\":\"MEDIUM\"},\"planningReason\":\"概念解释需要 self-local server 内的 RAG/context 证据锚定，也允许常识辅助。\"}",
     "mockFinalAnswer": "当前资料没有直接解释“为什么叫机会主义”，下面是基于一般知识的辅助理解：它之所以叫机会主义，是因为这种态度不是按稳定原则判断事情，而是看眼前哪边有利就靠向哪边。补充理解是：这里的公共知识解释不等于原文直接证据，只是帮助理解这个词为什么和“机会”有关。关键来源：当前未收集到足够证据；以上为一般知识辅助理解。"
   },
   {

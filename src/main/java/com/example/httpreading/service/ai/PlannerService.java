@@ -46,7 +46,7 @@ public class PlannerService {
             return planValidator.validateAndConvert(response, question);
         } catch (Exception ex) {
             if (PlannerIntentClassifier.requiresUnavailableExternalTool(question)) {
-                if (safeRequest.isExternalMcpEnabled() && !externalMcpClientService.routableServers().isEmpty()) {
+                if (safeRequest.isExternalMcpEnabled() && hasMatchingExternalMcpServer(question)) {
                     log.warn("LLM Planner 失败，问题需要外部 MCP，回退到 MCP server router。reason={}", ex.getMessage());
                     return externalMcpRouterFallbackPlan(question);
                 }
@@ -173,6 +173,25 @@ public class PlannerService {
     private boolean hasCurrentPage(AiChatRequest request) {
         return request != null && ((request.getSelectedText() != null && !request.getSelectedText().isBlank())
             || (request.getSelectedContext() != null && !request.getSelectedContext().isBlank()));
+    }
+
+    private boolean hasMatchingExternalMcpServer(String question) {
+        String text = normalize(question).toLowerCase(java.util.Locale.ROOT);
+        return externalMcpClientService.routableServers().stream()
+            .map(server -> String.valueOf(server.get("name")).trim())
+            .filter(name -> !name.isBlank())
+            .filter(name -> !"self-local".equals(name))
+            .anyMatch(name -> !requiresGithub(text) || "github".equalsIgnoreCase(name));
+    }
+
+    private boolean requiresGithub(String text) {
+        return text.contains("github")
+            || text.contains("git hub")
+            || text.contains("仓库")
+            || text.contains("repo")
+            || text.contains("repository")
+            || text.contains("commit")
+            || text.contains("readme");
     }
 
     private String normalize(String value) {

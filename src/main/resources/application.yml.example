@@ -41,12 +41,16 @@ mcp:
   client:
     servers:
       - name: self-local
-        description: "本地 MCP 调试服务"
+        description: "用于本项目内部阅读系统能力，例如 memory、RAG、context；不用于通用百科或外部网站信息。"
         url: http://localhost:8080/mcp
-        enabled: false
+        enabled: true
         timeoutSeconds: 10
         headers: {}
         allowedTools:
+          - memory_search
+          - rag_retrieve
+          - context_get_recent_dialogue
+          - context_get_current_page
           - context_build
       - name: github
         description: "GitHub MCP 服务"

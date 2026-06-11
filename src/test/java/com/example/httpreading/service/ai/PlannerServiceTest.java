@@ -26,7 +26,7 @@ class PlannerServiceTest {
         ToolRegistry toolRegistry = new ToolRegistry();
         modelClient = mock(ModelClient.class);
         externalMcpClientService = mock(ExternalMcpClientService.class);
-        when(externalMcpClientService.routableServers()).thenReturn(List.of());
+        when(externalMcpClientService.routableServers()).thenReturn(List.of(selfLocalServer()));
         plannerService = new PlannerService(
             modelClient,
             new ObjectMapper(),
@@ -60,18 +60,20 @@ class PlannerServiceTest {
             "NONE",
             "解释划词内容是什么意思",
             true,
-            "SINGLE_TOOL",
-            "[\"context.get_current_page\"]",
-            "[{\"toolName\":\"context.get_current_page\",\"arguments\":{\"bookId\":1,\"chapterIndex\":1,\"chapterTitle\":\"\",\"selectedText\":\"差序格局\",\"selectedContext\":\"上下文\"},\"reason\":\"需要当前划词上下文\"}]",
-            1));
+            "BOUNDED_REACT",
+            "[\"mcp.server:self-local\"]",
+            "[]",
+            5,
+            "CONTEXT_ANCHORED_MODEL_KNOWLEDGE"));
         AiChatRequest request = request("这里是什么意思？");
         request.setSelectedText("差序格局");
         request.setSelectedContext("上下文");
 
         ChatPlan plan = plannerService.plan(request);
 
-        assertEquals(ToolExecutionMode.SINGLE_TOOL, plan.executionMode());
-        assertTrue(plan.toolPlan().stream().anyMatch(step -> "context.get_current_page".equals(step.toolName())));
+        assertEquals(ToolExecutionMode.BOUNDED_REACT, plan.executionMode());
+        assertEquals(List.of("mcp.server:self-local"), plan.allowedTools());
+        assertTrue(plan.toolPlan().isEmpty());
     }
 
     @Test
@@ -81,14 +83,17 @@ class PlannerServiceTest {
             "NONE",
             "书里是怎么解释差序格局的？",
             true,
-            "SINGLE_TOOL",
-            "[\"rag.search\"]",
-            "[{\"toolName\":\"rag.search\",\"arguments\":{\"bookId\":1,\"chapterIndex\":1,\"query\":\"差序格局是什么意思\",\"topK\":5},\"reason\":\"检索书籍证据\"}]",
-            1));
+            "BOUNDED_REACT",
+            "[\"mcp.server:self-local\"]",
+            "[]",
+            5,
+            "CONTEXT_ANCHORED_MODEL_KNOWLEDGE"));
 
         ChatPlan plan = plannerService.plan(request("书里是怎么解释差序格局的？"));
 
-        assertTrue(plan.toolPlan().stream().anyMatch(step -> "rag.search".equals(step.toolName())));
+        assertEquals(ToolExecutionMode.BOUNDED_REACT, plan.executionMode());
+        assertEquals(List.of("mcp.server:self-local"), plan.allowedTools());
+        assertTrue(plan.toolPlan().isEmpty());
     }
 
     @Test
@@ -98,14 +103,17 @@ class PlannerServiceTest {
             "NONE",
             "结合用户之前的理解解释当前问题",
             true,
-            "SINGLE_TOOL",
-            "[\"memory.search\"]",
-            "[{\"toolName\":\"memory.search\",\"arguments\":{\"userId\":\"default_user\",\"sessionId\":\"book_1_chapter_1\",\"query\":\"之前的理解\",\"limit\":5},\"reason\":\"检索相关记忆\"}]",
-            1));
+            "BOUNDED_REACT",
+            "[\"mcp.server:self-local\"]",
+            "[]",
+            5,
+            "CONTEXT_ANCHORED_MODEL_KNOWLEDGE"));
 
         ChatPlan plan = plannerService.plan(request("结合我之前的理解说一下。"));
 
-        assertTrue(plan.toolPlan().stream().anyMatch(step -> "memory.search".equals(step.toolName())));
+        assertEquals(ToolExecutionMode.BOUNDED_REACT, plan.executionMode());
+        assertEquals(List.of("mcp.server:self-local"), plan.allowedTools());
+        assertTrue(plan.toolPlan().isEmpty());
     }
 
     @Test
@@ -115,16 +123,17 @@ class PlannerServiceTest {
             "NONE",
             "结合用户之前的问题和书里内容解释当前问题",
             true,
-            "MULTI_TOOL",
-            "[\"memory.search\",\"rag.search\"]",
-            "[{\"toolName\":\"memory.search\",\"arguments\":{\"userId\":\"default_user\",\"sessionId\":\"book_1_chapter_1\",\"query\":\"之前的问题\",\"limit\":5},\"reason\":\"检索记忆\"},{\"toolName\":\"rag.search\",\"arguments\":{\"bookId\":1,\"chapterIndex\":1,\"query\":\"书里的内容\",\"topK\":5},\"reason\":\"检索书籍证据\"}]",
-            2));
+            "BOUNDED_REACT",
+            "[\"mcp.server:self-local\"]",
+            "[]",
+            5,
+            "CONTEXT_ANCHORED_MODEL_KNOWLEDGE"));
 
         ChatPlan plan = plannerService.plan(request("结合我之前的问题和书里的内容解释一下。"));
 
-        assertEquals(ToolExecutionMode.MULTI_TOOL, plan.executionMode());
-        assertTrue(plan.toolPlan().stream().anyMatch(step -> "memory.search".equals(step.toolName())));
-        assertTrue(plan.toolPlan().stream().anyMatch(step -> "rag.search".equals(step.toolName())));
+        assertEquals(ToolExecutionMode.BOUNDED_REACT, plan.executionMode());
+        assertEquals(List.of("mcp.server:self-local"), plan.allowedTools());
+        assertTrue(plan.toolPlan().isEmpty());
     }
 
     @Test
@@ -227,6 +236,30 @@ class PlannerServiceTest {
     }
 
     @Test
+    void githubSearchWithOnlySelfLocalServerStillUsesUnsupportedExternalPlan() {
+        when(modelClient.chat(anyString())).thenReturn(planJson(
+            "READING_QA",
+            "NONE",
+            "使用 GitHub 搜索 httpreading 的项目",
+            true,
+            "BOUNDED_REACT",
+            "[\"mcp.server:self-local\"]",
+            "[]",
+            5,
+            "EXTERNAL_SEARCH_REQUIRED"));
+        AiChatRequest request = request("使用github搜索httpreading的项目");
+        request.setEnableExternalMcp(true);
+
+        ChatPlan plan = plannerService.plan(request);
+
+        assertEquals(ToolExecutionMode.NO_TOOL, plan.executionMode());
+        assertEquals(AnswerMode.EXTERNAL_SEARCH_REQUIRED, plan.answerMode());
+        assertTrue(plan.allowedTools().isEmpty());
+        assertTrue(plan.toolPlan().isEmpty());
+        assertTrue(plan.answerGuidance().contains("没有可用的 GitHub/外部搜索工具"));
+    }
+
+    @Test
     void githubSearchWithGithubServerUsesBoundedReactServerPlan() {
         when(externalMcpClientService.routableServers()).thenReturn(List.of(Map.of(
             "name", "github",
@@ -322,5 +355,17 @@ class PlannerServiceTest {
         request.setEnableMemory(true);
         request.setEnableRag(true);
         return request;
+    }
+
+    private Map<String, Object> selfLocalServer() {
+        return Map.of(
+            "name", "self-local",
+            "description", "本项目内部阅读系统能力",
+            "allowedTools", List.of(
+                "memory_search",
+                "rag_retrieve",
+                "context_get_recent_dialogue",
+                "context_get_current_page",
+                "context_build"));
     }
 }
