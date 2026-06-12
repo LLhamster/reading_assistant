@@ -122,11 +122,12 @@ class ExternalMcpAgentShadowLiveTest {
             "github");
 
         assertFalse(calledTool("create_file"));
-        assertTrue(result.getRefs().stream().anyMatch(ref -> ref.contains("自动 MCP Agent 禁止调用写操作工具"))
-            || result.getResults().stream().anyMatch(callResult ->
-            "create_file".equals(callResult.getToolName()) && !callResult.isOk()));
         assertFalse(result.getResults().stream()
             .anyMatch(callResult -> "create_file".equals(callResult.getToolName()) && callResult.isOk()));
+        result.getResults().stream()
+            .filter(callResult -> "create_file".equals(callResult.getToolName()))
+            .filter(callResult -> !callResult.isOk())
+            .forEach(callResult -> assertTrue(callResult.getError().contains("自动 MCP Agent 禁止调用写操作工具")));
     }
 
     private ExternalMcpCallResult fakeGitHubResult(ExternalMcpCall call) {
