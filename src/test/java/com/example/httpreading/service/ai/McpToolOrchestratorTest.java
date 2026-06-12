@@ -93,7 +93,7 @@ class McpToolOrchestratorTest {
     }
 
     @Test
-    void boundedReactWithSelectedMcpServerDelegatesToAgentServerOverload() {
+    void boundedReactShouldPassSelectedMcpServerToExternalAgent() {
         AiChatRequest request = request();
         request.setEnableExternalMcp(true);
         when(externalMcpAgentService.execute(eq(request), any(), eq("github")))
@@ -108,8 +108,10 @@ class McpToolOrchestratorTest {
             List.of()));
 
         assertEquals(1, result.results().size());
+        assertTrue(result.planRefs().stream().anyMatch(ref -> ref.contains("PLAN_MODE BOUNDED_REACT")));
         assertTrue(result.planRefs().stream().anyMatch(ref -> ref.contains("MCP_ROUTE github")));
         verify(externalMcpAgentService).execute(eq(request), any(), eq("github"));
+        verify(externalMcpAgentService, never()).execute(eq(request), any());
     }
 
 

@@ -1,6 +1,8 @@
 package com.example.httpreading.mcp;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
@@ -33,70 +35,193 @@ class ExternalMcpToolPlannerServiceTest {
     }
 
     @Test
-    void parsesSingleRoundToolDecision() {
+    void shouldParseCallToolDecision() {
         when(modelClient.chat(anyString())).thenReturn("""
-            {"status":"call_tool","assessment":"仓库名可能不完整","reasoningSummary":"先搜索仓库",\
-             "call":{"serverName":"github","toolName":"search_repositories",\
-             "arguments":{"query":"mask-dann in:name"}},"message":""}
+            {
+              "status": "call_tool",
+              "assessment": "需要先搜索仓库",
+              "reasoningSummary": "用户只给出仓库关键词，需要搜索仓库",
+              "call": {
+                "serverName": "github",
+                "toolName": "search_repositories",
+                "arguments": {
+                  "query": "httpreading"
+                }
+              },
+              "message": "",
+              "options": []
+            }
             """);
 
         ExternalMcpAgentDecision decision = plannerService.decide(
-            request(), "planning", tools(), List.of(), 2, 4);
+            request("使用 GitHub 搜索 httpreading 的项目"), "planning", githubTools(), List.of(), 1, 5);
 
         assertEquals("call_tool", decision.getStatus());
+        assertNotNull(decision.getCall());
+        assertEquals("github", decision.getCall().getServerName());
         assertEquals("search_repositories", decision.getCall().getToolName());
-        assertEquals("mask-dann in:name", decision.getCall().getArguments().get("query"));
+        assertEquals("httpreading", decision.getCall().getArguments().get("query"));
+        assertTrue(!decision.getAssessment().isBlank());
+        assertTrue(!decision.getReasoningSummary().isBlank());
     }
 
     @Test
-    void parsesNeedsConfirmationOptions() {
+    void shouldParseCompleteDecision() {
         when(modelClient.chat(anyString())).thenReturn("""
-            {"status":"needs_confirmation","assessment":"多个仓库候选","reasoningSummary":"需要用户确认",\
-             "call":null,"message":"你指的是哪个仓库？",\
-             "options":[{"id":"repo-1","label":"psanford/httpread","description":"公开仓库",\
-             "value":{"owner":"psanford","repo":"httpread"}}]}
+            {
+              "status": "complete",
+              "assessment": "已经获得目标仓库信息",
+              "reasoningSummary": "搜索结果已经足够回答用户问题",
+              "call": null,
+              "message": "",
+              "options": []
+            }
             """);
 
         ExternalMcpAgentDecision decision = plannerService.decide(
-            request(), "planning", tools(), List.of(), 2, 4);
+            request("总结仓库信息"), "planning", githubTools(), List.of(), 2, 4);
 
-        assertEquals("needs_confirmation", decision.getStatus());
-        assertEquals(1, decision.getOptions().size());
-        assertEquals("psanford/httpread", decision.getOptions().get(0).getLabel());
-        assertEquals("psanford", decision.getOptions().get(0).getValue().get("owner"));
+        assertEquals("complete", decision.getStatus());
+        assertNull(decision.getCall());
     }
 
     @Test
-    void promptContainsObservationsAndRequiresDynamicReflection() {
+    void shouldParseNeedsConfirmationOptions() {
+        when(modelClient.chat(anyString())).thenReturn("""
+            {
+              "status": "needs_confirmation",
+              "assessment": "存在多个候选仓库",
+              "reasoningSummary": "需要用户确认目标仓库",
+              "call": null,
+              "message": "搜索到多个可能仓库，请选择一个。",
+              "options": [
+                {
+                  "id": "repo-1",
+                  "label": "a/reading_assistant",
+                  "description": "候选 A",
+                  "value": {
+                    "owner": "a",
+                    "repo": "reading_assistant"
+                  }
+                },
+                {
+                  "id": "repo-2",
+                  "label": "b/reading_assistant",
+                  "description": "候选 B",
+                  "value": {
+                    "owner": "b",
+                    "repo": "reading_assistant"
+                  }
+                }
+              ]
+            }
+            """);
+
+        ExternalMcpAgentDecision decision = plannerService.decide(
+            request("读取 reading_assistant README"), "planning", githubTools(), List.of(), 2, 4);
+
+        assertEquals("needs_confirmation", decision.getStatus());
+        assertEquals(2, decision.getOptions().size());
+        assertEquals("a/reading_assistant", decision.getOptions().get(0).getLabel());
+        assertEquals("a", decision.getOptions().get(0).getValue().get("owner"));
+    }
+
+    @Test
+    void shouldExtractJsonFromMarkdownFence() {
+        when(modelClient.chat(anyString())).thenReturn("""
+            ```json
+            {
+              "status": "call_tool",
+              "assessment": "需要搜索",
+              "reasoningSummary": "先搜索仓库",
+              "call": {
+                "serverName": "github",
+                "toolName": "search_repositories",
+                "arguments": {
+                  "query": "httpreading"
+                }
+              },
+              "message": "",
+              "options": []
+            }
+            ```
+            """);
+
+        ExternalMcpAgentDecision decision = plannerService.decide(
+            request("使用 GitHub 搜索 httpreading 的项目"), "planning", githubTools(), List.of(), 1, 5);
+
+        assertEquals("call_tool", decision.getStatus());
+        assertNotNull(decision.getCall());
+        assertEquals("search_repositories", decision.getCall().getToolName());
+    }
+
+    @Test
+    void shouldReturnFailedWhenModelOutputInvalidJson() {
+        when(modelClient.chat(anyString())).thenReturn("我觉得应该先搜索仓库，但是这里不是 JSON。");
+
+        ExternalMcpAgentDecision decision = plannerService.decide(
+            request("使用 GitHub 搜索 httpreading 的项目"), "planning", githubTools(), List.of(), 1, 5);
+
+        assertEquals("failed", decision.getStatus());
+        assertTrue((decision.getAssessment() + decision.getMessage()).contains("AUTO_PLAN_PARSE_FAILED"));
+    }
+
+    @Test
+    void shouldIncludeAllowedToolsAndObservationsInPrompt() {
         when(modelClient.chat(anyString())).thenReturn(
-            "{\"status\":\"complete\",\"assessment\":\"done\",\"call\":null}");
+            "{\"status\":\"complete\",\"assessment\":\"done\",\"reasoningSummary\":\"done\",\"call\":null}");
         ExternalMcpAgentObservation observation = new ExternalMcpAgentObservation(
             1,
-            call("get_file_contents", Map.of("owner", "LLhamster", "repo", "mask-dann")),
-            ExternalMcpCallResult.failure("github", "get_file_contents", "repository not found"));
+            call("search_repositories", Map.of("query", "httpreading")),
+            ExternalMcpCallResult.success("github", "search_repositories",
+                "{\"items\":[{\"full_name\":\"LLhamster/reading_assistant\"}]}"));
 
-        plannerService.decide(request(), "planning", tools(), List.of(observation), 2, 4);
+        plannerService.decide(
+            request("使用 GitHub 搜索 httpreading 的项目"),
+            "Planner selected github because external repository search is required.",
+            githubReadTools(),
+            List.of(observation),
+            2,
+            4);
 
         ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
         verify(modelClient).chat(prompt.capture());
-        assertTrue(prompt.getValue().contains("repository not found"));
-        assertTrue(prompt.getValue().contains("不要依赖固定工具顺序"));
-        assertTrue(prompt.getValue().contains("search_repositories"));
-        assertTrue(prompt.getValue().contains("剩余工具调用额度：4"));
-        assertTrue(prompt.getValue().contains("资源标识必须来自用户明确提供的值"));
-        assertTrue(prompt.getValue().contains("full_name"));
-        assertTrue(prompt.getValue().contains("代码搜索不能代替仓库发现"));
+        String value = prompt.getValue();
+        assertTrue(value.contains("allowedTools"));
+        assertTrue(value.contains("search_repositories"));
+        assertTrue(value.contains("fetch_file"));
+        assertTrue(value.contains("get_repo"));
+        assertTrue(value.contains("observations"));
+        assertTrue(value.contains("LLhamster/reading_assistant"));
+        assertTrue(value.contains("当前轮次：2"));
+        assertTrue(value.contains("剩余工具调用额度：4"));
+        assertTrue(value.contains("使用 GitHub 搜索 httpreading 的项目"));
     }
 
     @Test
-    void invalidJsonReturnsFailedDecision() {
-        when(modelClient.chat(anyString())).thenReturn("not json");
+    void shouldLimitOptionsToThree() {
+        when(modelClient.chat(anyString())).thenReturn("""
+            {
+              "status": "needs_confirmation",
+              "assessment": "存在多个候选仓库",
+              "reasoningSummary": "需要用户确认",
+              "call": null,
+              "message": "请选择仓库",
+              "options": [
+                {"id":"repo-1","label":"a/reading_assistant","description":"A","value":{"owner":"a","repo":"reading_assistant"}},
+                {"id":"repo-2","label":"b/reading_assistant","description":"B","value":{"owner":"b","repo":"reading_assistant"}},
+                {"id":"repo-3","label":"c/reading_assistant","description":"C","value":{"owner":"c","repo":"reading_assistant"}},
+                {"id":"repo-4","label":"d/reading_assistant","description":"D","value":{"owner":"d","repo":"reading_assistant"}},
+                {"id":"repo-5","label":"e/reading_assistant","description":"E","value":{"owner":"e","repo":"reading_assistant"}}
+              ]
+            }
+            """);
 
         ExternalMcpAgentDecision decision = plannerService.decide(
-            request(), "planning", tools(), List.of(), 1, 5);
+            request("读取 reading_assistant README"), "planning", githubTools(), List.of(), 1, 5);
 
-        assertEquals("failed", decision.getStatus());
-        assertEquals("AUTO_PLAN_PARSE_FAILED", decision.getMessage());
+        assertEquals("needs_confirmation", decision.getStatus());
+        assertEquals(3, decision.getOptions().size());
     }
 
     @Test
@@ -106,10 +231,10 @@ class ExternalMcpToolPlannerServiceTest {
         String largeResult = "x".repeat(12000);
         ExternalMcpAgentObservation observation = new ExternalMcpAgentObservation(
             1,
-            call("list_commits", Map.of("owner", "LLhamster", "repo", "httpreader")),
-            ExternalMcpCallResult.success("github", "list_commits", largeResult));
+            call("fetch_file", Map.of("owner", "LLhamster", "repo", "httpreader", "path", "README.md")),
+            ExternalMcpCallResult.success("github", "fetch_file", largeResult));
 
-        plannerService.decide(request(), "planning", tools(), List.of(observation), 2, 4);
+        plannerService.decide(request("读取 LLhamster/httpreader README"), "planning", githubTools(), List.of(observation), 2, 4);
 
         ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
         verify(modelClient).chat(prompt.capture());
@@ -117,20 +242,39 @@ class ExternalMcpToolPlannerServiceTest {
         assertTrue(prompt.getValue().length() < 10000);
     }
 
-    private AiChatRequest request() {
+    private AiChatRequest request(String question) {
         AiChatRequest request = new AiChatRequest();
-        request.setQuestion("读取 mask-dann 仓库 README");
+        request.setQuestion(question);
         request.setBookId(1L);
         request.setChapterIndex(1);
         return request;
     }
 
-    private List<Map<String, Object>> tools() {
-        return List.of(Map.of(
+    private List<Map<String, Object>> githubReadTools() {
+        return List.of(
+            descriptor("search_repositories", "Search GitHub repositories by keyword.", List.of("query")),
+            descriptor("fetch_file", "Fetch a file from a GitHub repository by owner, repo, path.",
+                List.of("owner", "repo", "path")),
+            descriptor("get_repo", "Get repository metadata by owner and repo.", List.of("owner", "repo")));
+    }
+
+    private List<Map<String, Object>> githubTools() {
+        return List.of(
+            descriptor("search_repositories", "Search GitHub repositories by keyword.", List.of("query")),
+            descriptor("fetch_file", "Fetch a file from a GitHub repository by owner, repo, path.",
+                List.of("owner", "repo", "path")),
+            descriptor("get_repo", "Get repository metadata by owner and repo.", List.of("owner", "repo")),
+            descriptor("create_file", "Create or update a file.", List.of("owner", "repo", "path", "content")));
+    }
+
+    private Map<String, Object> descriptor(String toolName, String description, List<String> required) {
+        return Map.of(
             "serverName", "github",
-            "toolName", "search_repositories",
-            "description", "Search repositories",
-            "inputSchema", Map.of("type", "object", "required", List.of("query"))));
+            "toolName", toolName,
+            "description", description,
+            "inputSchema", Map.of(
+                "type", "object",
+                "required", required));
     }
 
     private ExternalMcpCall call(String toolName, Map<String, Object> arguments) {
