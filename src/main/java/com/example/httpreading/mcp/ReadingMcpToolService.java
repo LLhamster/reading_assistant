@@ -100,16 +100,18 @@ public class ReadingMcpToolService {
             return error("query 不能为空");
         }
 
-        List<Map<String, Object>> data = ragService.retrieve(
-                readLong(args, "bookId"),
-                readInteger(args, "chapterIndex"),
-                query,
-                positiveInt(args, "topK", DEFAULT_TOP_K))
+        List<ChunkDoc> chunks = ragService.retrieve(
+            readLong(args, "bookId"),
+            readInteger(args, "chapterIndex"),
+            query,
+            positiveInt(args, "topK", DEFAULT_TOP_K));
+        List<Map<String, Object>> data = (chunks == null ? List.<ChunkDoc>of() : chunks)
             .stream()
+            .filter(chunk -> chunk != null && chunk.getContent() != null && !chunk.getContent().isBlank())
             .map(this::chunkToMap)
             .toList();
         if (data.isEmpty()) {
-            return success(data, "未找到相关内容");
+            return success(List.of(), "RAG 未检索到相关内容");
         }
         return success(data);
     }

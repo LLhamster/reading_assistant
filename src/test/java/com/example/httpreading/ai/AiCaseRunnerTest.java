@@ -80,7 +80,7 @@ class AiCaseRunnerTest {
         return new PlannerService(
             modelClient(spec.mockPlannerResponse),
             objectMapper,
-            new PlannerPromptBuilder(toolRegistry, externalMcpClientService),
+            new PlannerPromptBuilder(externalMcpClientService),
             new PlanValidator(toolRegistry, externalMcpClientService),
             externalMcpClientService);
     }

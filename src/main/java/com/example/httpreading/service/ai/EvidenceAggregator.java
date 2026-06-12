@@ -97,18 +97,25 @@ public class EvidenceAggregator {
         int index = 1;
         for (Object value : list) {
             Map<String, Object> chunk = objectMap(value);
-            String content = normalize(String.valueOf(chunk.getOrDefault("content", "")));
+            String content = stringValue(chunk, "content");
             if (content.isBlank()) {
+                index++;
                 continue;
             }
             Integer chapterIndex = intValue(chunk.get("chapterIndex"));
-            boolean currentChapter = chapterIndex != null && chapterIndex.equals(request.getChapterIndex());
-            String sourceRef = normalize(String.valueOf(chunk.getOrDefault("sourceRef", "")));
+            boolean currentChapter = request != null
+                && chapterIndex != null
+                && chapterIndex.equals(request.getChapterIndex());
+            String sourceRef = stringValue(chunk, "sourceRef");
             if (sourceRef.isBlank()) {
                 sourceRef = "RAG 片段 " + index;
             }
+            String id = stringValue(chunk, "id");
+            if (id.isBlank()) {
+                id = String.valueOf(index);
+            }
             items.add(new EvidenceItem(
-                "rag:" + chunk.getOrDefault("id", index),
+                "rag:" + id,
                 currentChapter ? "rag_current_chapter" : "rag_other_chapter",
                 sourceRef,
                 content,
@@ -128,19 +135,26 @@ public class EvidenceAggregator {
         int index = 1;
         for (Object value : list) {
             Map<String, Object> memory = objectMap(value);
-            String content = normalize(String.valueOf(memory.getOrDefault("content", "")));
+            String content = stringValue(memory, "content");
             if (content.isBlank()) {
                 continue;
             }
-            String memoryType = normalize(String.valueOf(memory.getOrDefault("memoryType", "working")));
+            String memoryType = stringValue(memory, "memoryType");
+            if (memoryType.isBlank()) {
+                memoryType = "working";
+            }
             double importance = doubleValue(memory.get("importance"), 0.5d);
             int priority = switch (memoryType) {
                 case "working" -> 50;
                 case "episodic" -> 60;
                 default -> 65;
             };
+            String id = stringValue(memory, "id");
+            if (id.isBlank()) {
+                id = String.valueOf(index);
+            }
             items.add(new EvidenceItem(
-                "memory:" + memory.getOrDefault("id", index),
+                "memory:" + id,
                 memoryType + "_memory",
                 "[" + memoryType + "] " + truncate(content, 80),
                 content,
@@ -248,12 +262,23 @@ public class EvidenceAggregator {
             return Map.of();
         }
         Map<String, Object> map = new LinkedHashMap<>();
-        raw.forEach((key, item) -> map.put(String.valueOf(key), item));
+        raw.forEach((key, item) -> {
+            if (key != null && item != null) {
+                map.put(String.valueOf(key), item);
+            }
+        });
         return map;
     }
 
     private String stringFromMap(Object data, String key) {
         Map<String, Object> map = objectMap(data);
+        return stringValue(map, key);
+    }
+
+    private String stringValue(Map<String, Object> map, String key) {
+        if (map == null) {
+            return "";
+        }
         Object value = map.get(key);
         return value == null ? "" : normalize(String.valueOf(value));
     }

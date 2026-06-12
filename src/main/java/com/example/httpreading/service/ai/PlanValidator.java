@@ -48,7 +48,7 @@ public class PlanValidator {
         if (llmRequirement == null || !llmRequirement.complete()) {
             throw new PlanValidationException("answerRequirement is incomplete");
         }
-        DetailLevel.valueOf(llmRequirement.minDetailLevel());
+        AnswerRequirement answerRequirement = llmRequirement.toAnswerRequirement();
 
         String standaloneQuestion = requiredText(response.standaloneQuestion(), "standaloneQuestion");
         boolean dependsOnContext = response.dependsOnContext() != null && response.dependsOnContext();
@@ -63,6 +63,7 @@ public class PlanValidator {
         validateIntentConsistency(originalQuestion, standaloneQuestion, taskType, answerMode, dependsOnContext,
             allowedTools, toolPlan);
         validateTools(executionMode, allowedTools, toolPlan);
+        String planningReason = mergePlanningReason(response.taskTypeReason(), response.planningReason());
 
         List<ToolStep> steps = toolPlan.stream()
             .map(step -> new ToolStep(step.toolName(), step.arguments(), step.reason()))
@@ -70,10 +71,10 @@ public class PlanValidator {
         return new ChatPlan(
             originalQuestion,
             standaloneQuestion,
-            requiredText(response.planningReason(), "planningReason"),
+            planningReason,
             taskType,
             subIntent,
-            llmRequirement.toAnswerRequirement(),
+            answerRequirement,
             answerMode,
             evidenceStrictness,
             dependsOnContext,
@@ -84,6 +85,14 @@ public class PlanValidator {
             maxSteps,
             requiredText(response.stopCondition(), "stopCondition"),
             requiredText(response.answerGuidance(), "answerGuidance"));
+    }
+
+    private String mergePlanningReason(String taskTypeReason, String planningReason) {
+        String requiredPlanningReason = requiredText(planningReason, "planningReason");
+        if (taskTypeReason == null || taskTypeReason.isBlank()) {
+            return requiredPlanningReason;
+        }
+        return "任务类型判断：" + taskTypeReason.trim() + "\n规划理由：" + requiredPlanningReason;
     }
 
     private void validateMode(ToolExecutionMode mode, int maxSteps, List<LlmToolStep> toolPlan) {

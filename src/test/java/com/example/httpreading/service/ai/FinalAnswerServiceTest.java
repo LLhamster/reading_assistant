@@ -21,35 +21,27 @@ class FinalAnswerServiceTest {
 
         String prompt = service.buildPrompt(request(), plan(), evidence());
 
-        assertTrue(prompt.contains("不要写成教科书式条目堆砌"));
-        assertTrue(prompt.contains("只回答这个新增点"));
-        assertTrue(prompt.contains("不要把上一轮答案换个说法再讲一遍"));
-        assertTrue(prompt.contains("最近对话只用于理解追问指向"));
-        assertTrue(prompt.contains("重点解释“当时的人为什么看不清”"));
-        assertTrue(prompt.contains("不要重新回答“为什么他们重要”"));
-        assertTrue(prompt.contains("不要反复使用“首先、其次、综上所述”这套论文腔"));
+        assertTrue(prompt.contains("一、硬边界"));
+        assertTrue(prompt.contains("二、answerMode"));
+        assertTrue(prompt.contains("三、evidenceStrictness"));
+        assertTrue(prompt.contains("四、回答策略"));
+        assertTrue(prompt.contains("五、answerRequirement"));
+        assertTrue(prompt.contains("回答以用户问题为中心"));
+        assertTrue(prompt.contains("追问时只回答新增点"));
+        assertTrue(prompt.contains("不重复上一轮解释"));
+        assertTrue(prompt.contains("最近对话只用于理解追问"));
         assertTrue(prompt.contains("控制在 4-6 段"));
-        assertTrue(prompt.contains("先翻译成普通人的话"));
         assertTrue(prompt.contains("简单说"));
-        assertTrue(prompt.contains("不要固定标题式结构"));
-        assertTrue(prompt.contains("每个原因后面都要解释“为什么”"));
-        assertTrue(prompt.contains("不要在最终回答中完整展示 working memory"));
-        assertTrue(prompt.contains("记忆最多概括为“最近对话摘要”或“相关记忆”"));
+        assertTrue(prompt.contains("不允许提出、规划或执行工具调用"));
         assertTrue(prompt.contains("requiresConcreteExample=true"));
         assertTrue(prompt.contains("requiresStorytelling=true"));
         assertTrue(prompt.contains("answerMode=CONTEXT_ANCHORED_MODEL_KNOWLEDGE"));
-        assertTrue(prompt.contains("本系统不是纯 RAG 摘录器"));
-        assertTrue(prompt.contains("最终回答应以用户问题为主"));
-        assertTrue(prompt.contains("collectedEvidence 默认不是唯一依据"));
-        assertTrue(prompt.contains("允许根据公共知识回答"));
-        assertTrue(prompt.contains("当前资料没有直接解释，下面是基于一般知识的辅助理解"));
-        assertTrue(prompt.contains("为帮助理解补充的常识解释"));
-        assertTrue(prompt.contains("问题要求具体出处、具体人物、具体事件、具体时间地点"));
-        assertTrue(prompt.contains("不要低价值复述资料关键词"));
-        assertTrue(prompt.contains("更具体的焦点术语"));
-        assertTrue(prompt.contains("不能因为关键词重叠就回答成母概念的一般例子"));
-        assertTrue(prompt.contains("没有实际执行 GitHub、网页或外部实时搜索"));
-        assertTrue(prompt.contains("不能说“根据本次搜索结果”"));
+        assertTrue(prompt.contains("不要把公共知识、类比、推理补充说成原文或工具结果"));
+        assertTrue(prompt.contains("严格考据型真实案例"));
+        assertTrue(prompt.contains("理解辅助型例子"));
+        assertTrue(prompt.contains("不是当前资料直接提供的案例"));
+        assertTrue(prompt.contains("没有实际执行外部/GitHub/实时搜索"));
+        assertTrue(prompt.contains("不能说成“本次搜索结果”"));
         assertTrue(prompt.contains("当前未收集到足够证据；以上为一般知识辅助理解"));
     }
 
@@ -60,8 +52,8 @@ class FinalAnswerServiceTest {
         String prompt = service.buildPrompt(request(), conceptExplanationPlan(), emptyEvidence());
 
         assertTrue(prompt.contains("answerMode=CONTEXT_ANCHORED_MODEL_KNOWLEDGE"));
-        assertTrue(prompt.contains("即使 collectedEvidence 为空，也允许根据公共知识回答"));
-        assertTrue(prompt.contains("当前资料没有直接解释，下面是基于一般知识的辅助理解"));
+        assertTrue(prompt.contains("可以用公共知识补充解释"));
+        assertTrue(prompt.contains("当前资料没有直接解释"));
         assertTrue(prompt.contains("这不是原文直接证据"));
         assertTrue(prompt.contains("当前未收集到足够证据；以上为一般知识辅助理解"));
     }
@@ -73,9 +65,22 @@ class FinalAnswerServiceTest {
         String prompt = service.buildPrompt(request(), textOnlyPlan(), emptyEvidence());
 
         assertTrue(prompt.contains("answerMode=TEXT_ONLY"));
-        assertTrue(prompt.contains("只能基于 collectedEvidence 回答"));
-        assertTrue(prompt.contains("answerMode=TEXT_ONLY：只说明当前资料没有直接解释"));
-        assertTrue(prompt.contains("不要补充资料外内容"));
+        assertTrue(prompt.contains("只能基于 collectedEvidence"));
+        assertTrue(prompt.contains("资料没有就说明没有"));
+        assertTrue(prompt.contains("不补充资料外事实"));
+    }
+
+    @Test
+    void answerAcceptsEmptyCollectedEvidenceAndLetsModelDegradeGracefully() {
+        ModelClient modelClient = mock(ModelClient.class);
+        FinalAnswerService service = new FinalAnswerService(modelClient);
+        when(modelClient.chat(org.mockito.ArgumentMatchers.anyString()))
+            .thenReturn("当前资料没有直接解释，下面是基于一般知识的辅助理解。");
+
+        String answer = service.answer(request(), conceptExplanationPlan(), emptyEvidence());
+
+        assertTrue(answer.contains("当前资料没有直接解释"));
+        verify(modelClient).chat(contains("没有收集到足够证据"));
     }
 
     @Test

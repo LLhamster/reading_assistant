@@ -84,7 +84,28 @@ public class AiChatService {
         }
 
         CollectedEvidence evidence = evidenceAggregator.aggregate(request, plan, toolExecution);
-        String answer = finalAnswerService.answer(request, plan, evidence);
+        String answer;
+        try {
+            answer = finalAnswerService.answer(request, plan, evidence);
+        } catch (ModelClientException exception) {
+            logger.warn("最终回答模型调用失败，返回 model_unavailable。statusCode={}, retryable={}, evidenceCount={}",
+                exception.statusCode(), exception.retryable(), evidence.items().size());
+            contextManager.appendSnapshot(contextId, userId, "user", request.getQuestion(), requestMetadata(request));
+            String unavailableAnswer = modelUnavailableAnswer(exception, evidence);
+            contextManager.appendSnapshot(contextId, userId, "assistant", unavailableAnswer, Map.of(
+                "type", "model_unavailable",
+                "sourceCount", evidence.sources().size(),
+                "planMode", plan.executionMode().name()));
+
+            AiChatResponse response = new AiChatResponse(unavailableAnswer, evidence.sources());
+            response.setContextId(contextId);
+            response.setSessionId(sessionId);
+            response.setMemoryRefs(evidence.memoryRefs());
+            response.setExternalMcpRefs(evidence.externalMcpRefs());
+            response.setExternalMcpPlanRefs(evidence.externalMcpPlanRefs());
+            response.setStatus("model_unavailable");
+            return response;
+        }
         logger.info("AI Plan-and-Execute answer generated. planMode={}, evidenceCount={}",
             plan.executionMode(), evidence.items().size());
 
@@ -118,5 +139,15 @@ public class AiChatService {
         return Map.of(
             "bookId", request.getBookId(),
             "chapterIndex", request.getChapterIndex());
+    }
+
+    private String modelUnavailableAnswer(ModelClientException exception, CollectedEvidence evidence) {
+        if (exception.statusCode() == 429) {
+            return "模型服务当前繁忙，本轮已完成资料收集，但最终回答生成失败。请稍后重试。";
+        }
+        if (evidence != null && !evidence.items().isEmpty()) {
+            return "模型服务暂时不可用，本轮已完成资料收集，但最终回答生成失败。请稍后重试。";
+        }
+        return "模型服务暂时不可用，当前无法生成回答。请稍后重试。";
     }
 }

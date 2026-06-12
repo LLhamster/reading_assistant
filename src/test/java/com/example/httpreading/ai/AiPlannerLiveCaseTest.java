@@ -66,7 +66,7 @@ class AiPlannerLiveCaseTest {
         return new PlannerService(
             liveModelClient(),
             objectMapper,
-            new PlannerPromptBuilder(toolRegistry, externalMcpClientService),
+            new PlannerPromptBuilder(externalMcpClientService),
             new PlanValidator(toolRegistry, externalMcpClientService),
             externalMcpClientService);
     }

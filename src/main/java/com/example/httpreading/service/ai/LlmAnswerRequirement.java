@@ -35,6 +35,17 @@ public record LlmAnswerRequirement(Boolean requiresConcreteExample,
             Boolean.TRUE.equals(allowModelKnowledge),
             Boolean.TRUE.equals(mustDistinguishTextEvidenceAndSupplement),
             Boolean.TRUE.equals(avoidRepeatingSourcePhrases),
-            DetailLevel.valueOf(minDetailLevel));
+            parseDetailLevel(minDetailLevel));
+    }
+
+    private DetailLevel parseDetailLevel(String value) {
+        if (value == null || value.isBlank()) {
+            return DetailLevel.MEDIUM;
+        }
+        try {
+            return DetailLevel.valueOf(value.trim());
+        } catch (IllegalArgumentException ex) {
+            return DetailLevel.MEDIUM;
+        }
     }
 }

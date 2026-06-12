@@ -169,6 +169,32 @@ class PlanValidatorTest {
     }
 
     @Test
+    void unknownMinDetailLevelDefaultsToMediumInsteadOfRejectingPlan() {
+        LlmPlanResponse response = new LlmPlanResponse(
+            "GENERAL_QA",
+            "普通地理知识问题，不依赖当前阅读内容。",
+            "NONE",
+            "井冈山在哪里",
+            false,
+            "NO_TOOL",
+            List.of(),
+            List.of(),
+            "回答普通地理知识问题",
+            0,
+            "无需工具",
+            "直接回答，但不要伪造来源。",
+            "CONTEXT_ANCHORED_MODEL_KNOWLEDGE",
+            "LOOSE",
+            new LlmAnswerRequirement(false, false, false, false, false, false,
+                true, true, false, "NONE"),
+            "普通通用问答");
+
+        ChatPlan plan = validator.validateAndConvert(response, "井冈山在哪里");
+
+        assertEquals(DetailLevel.MEDIUM, plan.answerRequirement().minDetailLevel());
+    }
+
+    @Test
     void rejectsContextToolWhenPlanDoesNotDependOnContext() {
         assertThrows(PlanValidationException.class, () -> validator.validateAndConvert(response(
             "READING_QA",
@@ -187,6 +213,7 @@ class PlanValidatorTest {
                                      int maxSteps) {
         return new LlmPlanResponse(
             taskType,
+            "测试任务类型原因",
             "NONE",
             "独立问题",
             true,
@@ -213,6 +240,7 @@ class PlanValidatorTest {
                                      boolean dependsOnContext) {
         return new LlmPlanResponse(
             taskType,
+            "测试任务类型原因",
             "NONE",
             "独立问题",
             dependsOnContext,

@@ -20,7 +20,7 @@ class PlannerPromptBuilderTest {
             "name", "self-local",
             "description", "本项目内部阅读系统能力",
             "allowedTools", List.of("memory_search", "rag_retrieve", "context_get_recent_dialogue", "context_get_current_page"))));
-        PlannerPromptBuilder builder = new PlannerPromptBuilder(new ToolRegistry(), externalMcpClientService);
+        PlannerPromptBuilder builder = new PlannerPromptBuilder(externalMcpClientService);
 
         String prompt = builder.build(request());
 
@@ -30,9 +30,12 @@ class PlannerPromptBuilderTest {
         assertTrue(prompt.contains("rag_retrieve"));
         assertTrue(prompt.contains("\"answerRequirement\""));
         assertTrue(prompt.contains("不能输出 Markdown"));
-        assertTrue(prompt.contains("maxSteps 不能超过 5"));
-        assertTrue(prompt.contains("toolPlan 必须为空"));
-        assertTrue(prompt.contains("不要输出 server 内部具体工具名"));
+        assertTrue(prompt.contains("maxSteps<=5"));
+        assertTrue(prompt.contains("toolPlan=[]"));
+        assertTrue(prompt.contains("一级 Planner 永远不输出 server 内部具体工具名"));
+        assertTrue(prompt.contains("minDetailLevel 只能是 LOW、MEDIUM、HIGH"));
+        assertTrue(prompt.contains("\"taskTypeReason\""));
+        assertTrue(prompt.contains("taskTypeReason 必须说明为什么选择该 taskType"));
         assertFalse(prompt.contains("可用本地工具白名单"));
         assertFalse(prompt.contains("可用外部 MCP server 白名单"));
     }
@@ -49,7 +52,7 @@ class PlannerPromptBuilderTest {
                 "name", "github",
                 "description", "GitHub 仓库资料",
                 "allowedTools", List.of("search_repositories", "get_file_contents"))));
-        PlannerPromptBuilder builder = new PlannerPromptBuilder(new ToolRegistry(), externalMcpClientService);
+        PlannerPromptBuilder builder = new PlannerPromptBuilder(externalMcpClientService);
         AiChatRequest request = request();
         request.setEnableExternalMcp(true);
 
@@ -59,7 +62,9 @@ class PlannerPromptBuilderTest {
         assertTrue(prompt.contains("mcp.server:self-local"));
         assertTrue(prompt.contains("mcp.server:github"));
         assertTrue(prompt.contains("GitHub 仓库资料"));
-        assertTrue(prompt.contains("一级 Planner 只选择 server，不选择具体工具"));
+        assertTrue(prompt.contains("allowedTools 只能为空，或只包含一个白名单中的 mcp.server:*"));
+        assertTrue(prompt.contains("如果没有匹配 server，不要用 self-local 凑数"));
+        assertTrue(prompt.contains("外部搜索来补充资料，taskType=TOOL_ACTION"));
     }
 
     private AiChatRequest request() {

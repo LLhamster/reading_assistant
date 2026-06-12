@@ -133,6 +133,26 @@ class AiChatServiceTest {
         verify(mcpToolOrchestrator, never()).execute(any(), any());
     }
 
+    @Test
+    void finalAnswerModelUnavailableReturnsNonCompletedStatusAndSkipsMemoryWrite() {
+        AiChatRequest request = request();
+        ChatPlan plan = plan(ToolExecutionMode.MULTI_TOOL);
+        ToolExecutionResult execution = ToolExecutionResult.completed(List.of(), List.of("PLAN_MODE MULTI_TOOL"));
+        CollectedEvidence evidence = evidence();
+        when(plannerService.plan(request)).thenReturn(plan);
+        when(mcpToolOrchestrator.execute(request, plan)).thenReturn(execution);
+        when(evidenceAggregator.aggregate(request, plan, execution)).thenReturn(evidence);
+        when(finalAnswerService.answer(request, plan, evidence))
+            .thenThrow(new ModelClientException("模型接口请求失败: 429", 429, true));
+
+        AiChatResponse response = aiChatService.chat(request);
+
+        assertEquals("model_unavailable", response.getStatus());
+        assertEquals(List.of("当前阅读页面划词：章节"), response.getSources());
+        assertEquals(List.of("[working] 用户偏好"), response.getMemoryRefs());
+        verify(memoryWriter, never()).write(any(), any(), any(), any());
+    }
+
     private AiChatRequest request() {
         AiChatRequest request = new AiChatRequest();
         request.setBookId(1L);

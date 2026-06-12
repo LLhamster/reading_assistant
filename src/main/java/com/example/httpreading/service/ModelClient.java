@@ -16,6 +16,8 @@ import java.util.concurrent.TimeUnit;
 @Component
 public class ModelClient {
     private static final Logger log = LoggerFactory.getLogger(ModelClient.class);
+    private static final int MAX_CHAT_ATTEMPTS = 3;
+    private static final long RETRY_BASE_DELAY_MS = 800L;
 
     private static final OkHttpClient HTTP_CLIENT =
             new OkHttpClient.Builder()
@@ -32,6 +34,24 @@ public class ModelClient {
     private String dashscopeEmbeddingModel;
 
     public String chat(String question) {
+        ModelClientException lastException = null;
+        for (int attempt = 1; attempt <= MAX_CHAT_ATTEMPTS; attempt++) {
+            try {
+                return doChat(question, attempt);
+            } catch (ModelClientException exception) {
+                lastException = exception;
+                if (!exception.retryable() || attempt >= MAX_CHAT_ATTEMPTS) {
+                    throw exception;
+                }
+                sleepBeforeRetry(attempt, exception);
+            }
+        }
+        throw lastException == null
+            ? new ModelClientException("模型接口请求失败", -1, true)
+            : lastException;
+    }
+
+    private String doChat(String question, int attempt) {
         try {
             JSONObject root = new JSONObject();
             root.put("model", "moonshot-v1-8k");
@@ -59,9 +79,13 @@ public class ModelClient {
             try (Response response = HTTP_CLIENT.newCall(request).execute()) {
                 raw = response.body() == null ? "" : response.body().string();
                 if (!response.isSuccessful()) {
+                    boolean retryable = isRetryableStatus(response.code());
                     log.warn("模型 HTTP 请求失败 - code:{}, message:{}, body: {}",
                         response.code(), response.message(), truncateLog(raw));
-                    return "模型接口请求失败: " + response.code();
+                    throw new ModelClientException(
+                        "模型接口请求失败: " + response.code() + " attempt=" + attempt,
+                        response.code(),
+                        retryable);
                 }
             }
 
@@ -79,7 +103,23 @@ public class ModelClient {
             return "模型返回格式不符合预期";
         } catch (IOException e) {
             log.warn("调用模型接口异常: {}", e.getMessage());
-            return "调用模型接口异常: " + e.getMessage();
+            throw new ModelClientException("调用模型接口异常: " + e.getMessage(), -1, true, e);
+        }
+    }
+
+    private boolean isRetryableStatus(int statusCode) {
+        return statusCode == 408 || statusCode == 409 || statusCode == 429 || statusCode >= 500;
+    }
+
+    private void sleepBeforeRetry(int attempt, ModelClientException exception) {
+        long delayMs = RETRY_BASE_DELAY_MS * attempt;
+        log.warn("模型调用失败，准备重试 attempt={}/{} delayMs={} statusCode={}",
+            attempt + 1, MAX_CHAT_ATTEMPTS, delayMs, exception.statusCode());
+        try {
+            Thread.sleep(delayMs);
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            throw new ModelClientException("模型调用重试等待被中断", exception.statusCode(), false, interruptedException);
         }
     }
 

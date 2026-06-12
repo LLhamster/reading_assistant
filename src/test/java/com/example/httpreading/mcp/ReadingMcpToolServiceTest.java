@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -94,9 +95,37 @@ class ReadingMcpToolServiceTest {
         Map<String, Object> response = json(service.ragRetrieve(Map.of("query", "missing", "topK", -1)));
 
         assertEquals(true, response.get("ok"));
-        assertEquals("未找到相关内容", response.get("message"));
+        assertEquals("RAG 未检索到相关内容", response.get("message"));
         assertTrue(((List<?>) response.get("data")).isEmpty());
         verify(ragService).retrieve(null, null, "missing", 3);
+    }
+
+    @Test
+    void ragRetrieveNormalizesNullAndEmptyChunksToEmptyData() throws Exception {
+        ChunkDoc emptyContent = chunk("empty-content");
+        emptyContent.setContent(null);
+        List<ChunkDoc> chunks = new ArrayList<>();
+        chunks.add(null);
+        chunks.add(emptyContent);
+        when(ragService.retrieve(null, null, "bad chunks", 3))
+            .thenReturn(chunks);
+
+        Map<String, Object> response = json(service.ragRetrieve(Map.of("query", "bad chunks")));
+
+        assertEquals(true, response.get("ok"));
+        assertEquals("RAG 未检索到相关内容", response.get("message"));
+        assertTrue(((List<?>) response.get("data")).isEmpty());
+    }
+
+    @Test
+    void ragRetrieveNormalizesNullRetrieveResultToEmptyData() throws Exception {
+        when(ragService.retrieve(null, null, "null result", 3)).thenReturn(null);
+
+        Map<String, Object> response = json(service.ragRetrieve(Map.of("query", "null result")));
+
+        assertEquals(true, response.get("ok"));
+        assertEquals("RAG 未检索到相关内容", response.get("message"));
+        assertTrue(((List<?>) response.get("data")).isEmpty());
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.example.httpreading.service.ai;
 import java.util.List;
 
 public record LlmPlanResponse(String taskType,
+                              String taskTypeReason,
                               String subIntent,
                               String standaloneQuestion,
                               Boolean dependsOnContext,

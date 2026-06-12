@@ -14,6 +14,19 @@ public record EvidenceItem(String id,
         type = type == null ? "" : type;
         source = source == null ? "" : source;
         content = content == null ? "" : content;
-        metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
+        metadata = safeMetadata(metadata);
+    }
+
+    private static Map<String, Object> safeMetadata(Map<String, Object> metadata) {
+        if (metadata == null || metadata.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Object> cleaned = new java.util.LinkedHashMap<>();
+        metadata.forEach((key, value) -> {
+            if (key != null && value != null) {
+                cleaned.put(key, value);
+            }
+        });
+        return cleaned.isEmpty() ? Map.of() : Map.copyOf(cleaned);
     }
 }

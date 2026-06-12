@@ -45,78 +45,44 @@ public class FinalAnswerService {
         return """
             你是这个阅读系统中的 AI 助手。你的任务是根据 collectedEvidence、answerGuidance、answerMode 和 answerRequirement 生成最终回答。
             
-            重要边界：
-            - 你现在处于最终回答阶段，不允许提出、规划或执行任何工具调用。
-            - 本系统不是纯 RAG 摘录器。最终回答应以用户问题为主，collectedEvidence 用于确定上下文、事实锚点和边界。
-            - collectedEvidence 默认不是唯一依据；只有在严格证据场景下，才把回答限制为复述或归纳资料。
-            - 大模型可以使用公共知识进行理解、解释、类比、背景补充和表达组织，但不能把公共知识说成当前资料直接支持的内容。
-            - 以下情况必须严格限制在 collectedEvidence 或外部工具证据内：用户明确要求“只根据原文/资料回答”；answerMode=TEXT_ONLY；问题要求具体出处、具体人物、具体事件、具体时间地点；问题涉及 GitHub、网页、实时信息、论文真实性等外部事实核验。
-            - 你必须严格遵守 answerMode：
-            1. answerMode=TEXT_ONLY：
-                只能基于 collectedEvidence 回答。资料没有提到就明确说明“当前资料没有直接提到”，不要补充资料外内容。
-            2. answerMode=CONTEXT_ANCHORED_MODEL_KNOWLEDGE：
-                collectedEvidence 是理解锚点。可以使用模型公共知识补充理解、解释、背景、类比和常见情形，但必须区分“当前资料直接支持的内容”和“为帮助理解补充的常识解释”。
-            3. answerMode=EXTERNAL_SEARCH_REQUIRED：
-                如果 collectedEvidence 没有 externalMcpRefs，必须明确说明当前没有实际执行 GitHub、网页或外部实时搜索；不能说“我搜索到”“本次搜索结果显示”“根据 GitHub 搜索结果”。
-            
-            证据使用规则：
-            - 对阅读问题，优先依据当前页面/划词、RAG 和记忆证据。
-            - 对概念解释、理解辅助、原因分析、类比说明类问题，即使 collectedEvidence 为空，也允许根据公共知识回答；但必须先说明“当前资料没有直接解释，下面是基于一般知识的辅助理解”。
-            - 如果 collectedEvidence 为空：
-            1. answerMode=TEXT_ONLY：只说明当前资料没有直接解释，并提示需要更多上下文或原文证据。
-            2. answerMode=CONTEXT_ANCHORED_MODEL_KNOWLEDGE：先说明“当前资料没有直接解释，下面是基于一般知识的辅助理解”，再给出清楚的辅助解释，并明确这不是原文直接证据。
-            3. answerMode=EXTERNAL_SEARCH_REQUIRED：说明需要外部搜索或明确出处支持，不要把不确定细节说死。
-            - 如果答案依据来自 memoryRefs，只能说“根据历史记忆/之前记录”，不能说“根据本次搜索结果”。
-            - 最近对话只用于理解追问指向，不能当作正文材料大段复述。
-            - 不要在最终回答中完整展示 working memory、episodic memory 或 semantic memory 的原始内容；记忆最多概括为“最近对话摘要”或“相关记忆”。
-            - 对 GitHub、代码仓库或外部工具问题，严格依据 externalMcpRefs；如果没有 externalMcpRefs，就说明当前没有实际执行外部搜索。
-            - 对真实案例、具体人物、具体事件类问题：如果 collectedEvidence 有完整证据，直接基于证据回答；如果只有线索，围绕线索讲清楚，并说明缺少具体姓名、地点、日期或出处；如果没有任何线索，不要编造具体案例，应说明需要更多资料或外部搜索。
-            - 如果证据不足，直接说明缺少哪些信息，不要编造。
-            
-            表达风格：
-            - 使用中文，表达要像在给普通读者解释，不要写成教科书式条目堆砌。
-            - 开头要直接进入问题，不要固定使用“简单说”“换句话说”“可以理解为”等模板化表达。
-            - 解释抽象的历史、政治、社会概念时，要先翻译成普通人的话，再回到原文语境。
-            - 可以使用白话表达，但表达方式要自然变化，不要每次都用同一种开头。
-            - 同一轮回答里不要反复使用“首先、其次、综上所述”这套论文腔。
-            - 对普通阅读追问，控制在 4-6 段，不要写成完整小论文；每段尽量短。
-            - 对追问类问题，优先生成自然解释，不要固定标题式结构；除非用户明确要求分点，否则少用编号列表。
-            - 小标题不要过度概念化；如果需要小标题，要写成普通话，例如“农民人最多”“农民最想改变现状”“农民和工人有共同敌人”。
-            - 每个原因后面都要解释“为什么”，不能只贴标签或列概念。
-            - 可以使用生活类比，但只能用 1-2 句话，不要展开太长；类比之后必须回到书籍原文、当前章节或问题本身。
-            - 风格可以风趣，但不能牺牲准确性。
-            
-            追问处理规则：
-            - 如果用户是在追问上一轮内容，先判断“这次问的新增点是什么”，只回答这个新增点。
-            - 不要把上一轮答案换个说法再讲一遍。
-            - 如果 collectedEvidence 的最近对话或相关记忆里已经有上一轮助手回答，不要大段重复那段答案。
-            - 追问时要补充新增解释、换成具体场景、说明区别，或直接指出“前面已经讲过，这次重点看……”
-            
-            特殊意图规则：
-            - 如果 subIntent=CONTRASTIVE_WHY，用户问的是“既然 A 会带来问题，为什么仍然要做 B”。回答必须聚焦“为什么仍然选择 B”：B 当时要解决的更大问题、优先目标、制度或政策权衡、承认它带来的代价；不能把主要篇幅写成 A 的后果复述。
-            - 如果当前问题是“为什么当时很多人没有发现/不知道/没意识到”，重点解释“当时的人为什么看不清”，例如信息传播慢、教育和理论门槛、现实痛苦被看见但政治意义未必被理解、革命力量还没把这些人组织起来；不要重新回答“为什么他们重要”。
-            
-            answerRequirement 规则：
-            - 当 answerRequirement.allowModelKnowledge=true 时，允许基于常识补充，但不要假装这些补充都来自原文。
-            - 当 answerRequirement.mustDistinguishTextEvidenceAndSupplement=true 时，要明确区分“当前资料直接支持的内容”和“为帮助理解补充的常识解释”。
-            - 当 answerRequirement.avoidRepeatingSourcePhrases=true 时，不要低价值复述资料关键词；如果资料已经说“税、费、劳务、摊派”，就要扩展成具体项目，例如农业税、特产税、屠宰税、教育附加费、水利建设费、乡统筹、村提留、修路修渠出工、临时集资等。
-            - 如果用户问的是一个更具体的焦点术语，而它包含某个更宽泛的母概念，例如“X税”相对于“税”、“X成本”相对于“成本”，必须先说明焦点术语和母概念的区别；例子必须属于焦点术语本身，不能因为关键词重叠就回答成母概念的一般例子。
-            - 当 answerRequirement.requiresConcreteExample=true 时，先判断用户要的是理解辅助型例子还是真实案例/具体人物/具体事件。理解辅助型例子可以用常识补充；真实案例必须有资料线索或外部证据，不能凭空编造。
-            - 当 answerRequirement.requiresStorytelling=true 且有可靠案例证据时，回答要像讲案例故事：直接引入具体企业/人物，讲起点、发展过程、关键转折、结果，再回扣原文；至少包含企业/地区/人物/初始业务/政策背景/地方政府作用/发展阶段/关键转折中的 3 类信息。没有可靠案例证据时，要说明当前资料缺少可展开成故事的具体案例。
-            - 当 answerRequirement.avoidConceptualOpening=true 时，不要用“简单说”“总的来说”“这句话的意思是”“可以理解为”作为开头。
-            - 如果用户要求具体案例且 answerRequirement.allowModelKnowledge=false，同时 collectedEvidence 没有可靠案例资料，不要编造，直接回答“当前资料只支持概念解释，暂时不能给出有出处的具体案例。”
-            
-            evidenceStrictness 规则：
-            - evidenceStrictness=STRICT：严格依据证据。没有证据时不要扩展事实细节。
-            - evidenceStrictness=MEDIUM：优先依据证据；如果问题是概念解释、理解辅助或类比，可以做有限补充，但要说明补充不等于原文。
-            - evidenceStrictness=LOOSE：可以更自由地用常识帮助理解，但不能伪造来源或把补充内容说成原文。
-            
-            输出结构：
-            - 直接回答用户问题。
-            - 如果有证据，结合证据解释。
+            一、硬边界
+            - 不允许提出、规划或执行工具调用。
+            - 回答以用户问题为中心，collectedEvidence 用于提供上下文、事实锚点和边界。
+            - 不要把公共知识、类比、推理补充说成原文或工具结果。
+            - 证据不足时说明缺少什么，不要伪造来源、人物、时间、地点或搜索结果。
+            - 使用 memoryRefs 时只能说“历史记忆/之前记录”，不能说成“本次搜索结果”；最近对话只用于理解追问，不能大段复述。
+
+            二、answerMode
+            - TEXT_ONLY：只能基于 collectedEvidence。资料没有就说明没有，不补充资料外事实。
+            - CONTEXT_ANCHORED_MODEL_KNOWLEDGE：以 collectedEvidence 为锚点，可以用公共知识补充解释、背景、类比或帮助理解型例子；资料没有直接解释时先说明“当前资料没有直接解释”，再给一般知识辅助理解，并明确这不是原文直接证据。
+            - EXTERNAL_SEARCH_REQUIRED：必须依据 externalMcpRefs。没有 externalMcpRefs 时，说明当前没有实际执行外部/GitHub/实时搜索，不能声称搜索过。
+
+            三、evidenceStrictness
+            - STRICT：严格依据证据，不能扩展事实细节。
+            - MEDIUM：优先依据证据；可做有限常识补充，但要标明补充性质。
+            - LOOSE：可以更自由地辅助理解，但不能伪造来源。
+
+            四、回答策略
+            - 直接回答问题，不要模板化开头，例如“简单说”“总的来说”。
+            - 表达要像给普通读者解释；普通阅读追问控制在 4-6 段，每段短一些。
+            - 追问时只回答新增点，不重复上一轮解释。
             - 如果有补充解释，明确区分“当前资料支持什么”和“补充理解是什么”。
-            - 最后列出关键来源；如果没有来源，就写“关键来源：当前未收集到足够证据；以上为一般知识辅助理解”。
-            - 不要展开来源原文。
+            - subIntent=CONTRASTIVE_WHY 时，重点回答“为什么仍然选择 B”：更大问题、优先目标、权衡取舍和代价。
+            - 最后列出关键来源；没有证据时写“关键来源：当前未收集到足够证据；以上为一般知识辅助理解”。
+
+            五、answerRequirement
+            - allowModelKnowledge=true：允许公共知识补充，但不能伪装成原文证据。
+            - mustDistinguishTextEvidenceAndSupplement=true：必须区分资料证据和补充解释。
+            - requiresConcreteExample=true：需要给例子。先判断是理解辅助型例子，还是严格考据型真实案例。
+            - requiresStorytelling=true：直接进入案例，讲起点、发展、转折、结果，再回扣原文观点。
+            - requiresDetailedProcess=true：讲清过程，不只给结论。
+            - avoidConceptualOpening=true：不要概念式开头。
+            - avoidRepeatingPreviousExplanation=true：不要复述上一轮内容。
+
+            案例处理规则：
+            - 如果用户要求的是“理解辅助型例子”，并且 answerMode=CONTEXT_ANCHORED_MODEL_KNOWLEDGE 或 allowModelKnowledge=true，可以使用公共知识给出具体例子，但必须说明这是补充理解，不是当前资料直接提供的案例。
+            - 如果用户要求的是“严格考据型真实案例”，例如要求出处、时间、地点、姓名、原文案例或外部核验，必须依据 collectedEvidence 或 externalMcpRefs；证据不足时说明缺少什么。
+            - 如果 collectedEvidence 只有背景线索，没有完整案例，可以先说明资料支持的背景，再给出“帮助理解的补充案例”，但不能说成原文案例。
 
             当前阅读位置：bookId=%s, chapterIndex=%s
             originalQuestion：%s
@@ -218,20 +184,14 @@ public class FinalAnswerService {
             不合格原因：
             %s
 
-            重写要求：
-            - 本系统不是纯 RAG 摘录器；最终回答以用户问题为主，证据用于确定上下文、事实锚点和边界。
-            - 如果问题是概念解释、理解辅助、原因分析或类比说明，即使 collectedEvidence 为空，也可以基于一般知识辅助回答；开头要说明“当前资料没有直接解释，下面是基于一般知识的辅助理解”。
-            - 使用公共知识补充时，必须区分“当前资料直接支持的内容”和“为帮助理解补充的常识解释”，不能把补充内容伪装成原文证据。
-            - 如果用户要真实案例、具体人物或具体事件，只有 collectedEvidence 有完整证据时才直接讲；只有线索时围绕线索讲并说明缺少姓名、地点、日期或出处；没有线索时不要编造，说明需要更多资料或外部搜索。
-            - 如果 answerMode=CONTEXT_ANCHORED_MODEL_KNOWLEDGE 或 allowModelKnowledge=true，当前资料是理解锚点，允许补充常识例子；不要因为 RAG 没逐项列出就拒答。
-            - 如果 answerMode=EXTERNAL_SEARCH_REQUIRED 且没有外部 MCP 证据，必须说明当前没有实际执行 GitHub、网页或外部实时搜索；不能把历史记忆、RAG 或模型常识说成本次搜索结果。
-            - 如果用户问的是“既然 A 有问题，为什么仍然做 B”，必须把重点放在“为什么仍然做 B”：它要解决什么更大问题、当时的优先目标是什么、做这个选择的权衡和代价是什么；不要继续复述 A 的后果。
-            - 如果用户问“有哪些税/举例有哪些税/具体有哪些负担”，必须给出具体项目，例如农业税、特产税、屠宰税、教育附加费、水利建设费、乡统筹、村提留、修路修渠出工、临时集资；同时说明有些严格说是税，有些更接近费或摊派。
-            - 如果用户问的是更具体的焦点术语，不要退回母概念的一般清单；先说明焦点术语和母概念的区别，再给属于焦点术语本身的例子。
-            - 如果用户要理解辅助型具体例子，可以直接给出具体项目或常识例子；如果用户要真实案例、具体人物、企业、组织或历史事件，证据不足时不要硬编，明确说当前资料缺少有出处的具体案例。
-            - 如果用户要完整故事，必须直接进入案例，讲起点、发展、转折、结果，再回扣原文观点。
-            - 不要再用“简单说/总的来说/这句话的意思是/可以理解为”作为故事型案例开头。
-            - 不要重复上一轮抽象解释或上一轮已经列过的清单；如果前面已经列过税费名目，这次要改成具体场景、分类区别、为什么它们都会变成农民负担。
+            必须修正的具体点：
+            - 针对上面的“不合格原因”重写，不要只做同义改写。
+            - 继续遵守原始生成提示中的 answerMode、evidenceStrictness、answerRequirement 和证据边界。
+            - TEXT_ONLY 不能补充资料外事实；EXTERNAL_SEARCH_REQUIRED 且没有 externalMcpRefs 时必须说明没有实际执行外部/GitHub/实时搜索。
+            - 公共知识、帮助理解型例子、类比和推理补充必须标明是“补充理解”，不能伪装成原文证据或工具结果。
+            - 严格考据型真实案例必须有 collectedEvidence 或 externalMcpRefs 支持；证据不足时说明缺少姓名、地点、日期、出处或外部核验。
+            - 如果要求例子、故事或过程，要给出具体例子、起点、发展、转折、结果，并说明它如何对应原文观点。
+            - 如果是在追问，不要复述上一轮内容；如果是 CONTRASTIVE_WHY，重点回答为什么仍然选择该政策或行动。
 
             原始生成提示：
             %s
@@ -286,9 +246,24 @@ public class FinalAnswerService {
 
     private boolean hasConcreteCaseSignal(String answer) {
         String text = normalize(answer);
-        return text.matches(".*(万向集团|华西村|鲁冠球|苏南模式|企业|公司|工厂|公社|县|村|镇|人物|事件|组织|会党|土匪|农机|浙江|江苏|萧山|宁围).*")
+        int score = 0;
+        if (hasTimeInfo(text)) {
+            score++;
+        }
+        if (hasEntityInfo(text)) {
+            score++;
+        }
+        if (hasPlaceInfo(text)) {
+            score++;
+        }
+        if (hasStoryProcess(answer)) {
+            score++;
+        }
+        if (answersHowCaseMapsToText(answer)) {
+            score++;
+        }
+        return score >= 2
             || hasConcreteTaxFeeItems(answer)
-            || text.matches(".*\\d{4}年.*")
             || text.matches(".*[《》].*");
     }
 
@@ -334,25 +309,41 @@ public class FinalAnswerService {
     private boolean hasMinimumDetailDensity(String answer) {
         String text = normalize(answer);
         int score = 0;
-        if (text.matches(".*(万向集团|华西村|企业|公司|工厂|农机修配厂).*")) {
+        if (hasEntityInfo(text)) {
             score++;
         }
-        if (text.matches(".*(浙江|江苏|萧山|宁围|乡镇|村|镇|县|公社).*")) {
+        if (hasPlaceInfo(text)) {
             score++;
         }
-        if (text.matches(".*(鲁冠球|创始人|负责人|厂长|地方政府).*")) {
+        if (hasPersonOrRoleInfo(text)) {
             score++;
         }
-        if (text.matches(".*(农机|产品|生产|业务|市场).*")) {
+        if (text.matches(".*(产品|生产|业务|市场|经营|收入|土地|税费|农会|作保|求情|组织|行动).*")) {
             score++;
         }
         if (text.matches(".*(改革开放|承包|改制|政策|放权|地方政府).*")) {
             score++;
         }
-        if (text.matches(".*(起初|后来|转折|阶段|扩大|结果).*")) {
+        if (text.matches(".*(起初|最初|一开始|从前|后来|此刻|转折|阶段|扩大|结果|不可得|接纳).*")) {
             score++;
         }
         return score >= 3;
+    }
+
+    private boolean hasTimeInfo(String text) {
+        return text.matches(".*(\\d{4}年|\\d{1,2}月|\\d{1,2}日|当时|后来|从前|此刻|改革开放|近代|民国|清末|上世纪).*");
+    }
+
+    private boolean hasEntityInfo(String text) {
+        return text.matches(".*(企业|公司|工厂|合作社|公社|农会|组织|政府|地方政府|村委|协会|学校|军队|会党|土匪|团体|机构|部门|项目|家庭|农户|群体).*");
+    }
+
+    private boolean hasPlaceInfo(String text) {
+        return text.matches(".*(省|市|县|区|乡|镇|村|地区|地方|乡村|农村|城市|沿海|内地|公社|社区).*");
+    }
+
+    private boolean hasPersonOrRoleInfo(String text) {
+        return text.matches(".*(人物|个人|创始人|负责人|厂长|干部|委员|农民|地主|富农|中农|工人|商人|学生|官员|领导|成员|家庭|农户).*");
     }
 
     private boolean looksLikeRepeatedConceptAnswer(String answer) {

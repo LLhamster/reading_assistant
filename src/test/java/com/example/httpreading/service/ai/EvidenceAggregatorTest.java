@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
+import java.util.Map;
 
 import com.example.httpreading.dto.AiChatRequest;
 import com.example.httpreading.mcp.ExternalMcpCallResult;
@@ -48,6 +49,55 @@ class EvidenceAggregatorTest {
 
         assertEquals(1, evidence.items().size());
         assertFalse(evidence.externalMcpRefs().isEmpty());
+    }
+
+    @Test
+    void ignoresEmptyAndNullRagDataWithoutThrowing() {
+        List<String> payloads = List.of(
+            "{\"ok\":true,\"data\":[]}",
+            "{\"ok\":true,\"data\":null}",
+            "{\"ok\":true,\"data\":[null]}",
+            "{\"ok\":true,\"data\":[{\"id\":\"c1\",\"chapterIndex\":1,\"sourceRef\":\"当前章\",\"content\":null}]}");
+
+        for (String payload : payloads) {
+            ToolExecutionResult execution = ToolExecutionResult.completed(List.of(
+                ExternalMcpCallResult.success("local", "rag_retrieve", payload)), List.of());
+
+            CollectedEvidence evidence = aggregator.aggregate(request(), plan(), execution);
+
+            assertTrue(evidence.items().isEmpty());
+            assertTrue(evidence.sources().isEmpty());
+        }
+    }
+
+    @Test
+    void ragChunkWithNullOptionalFieldsUsesSafeFallbacks() {
+        ToolExecutionResult execution = ToolExecutionResult.completed(List.of(
+            ExternalMcpCallResult.success("local", "rag_retrieve",
+                "{\"ok\":true,\"data\":[{\"id\":null,\"chapterIndex\":null,\"sourceRef\":null,\"content\":\"有效片段\"}]}")),
+            List.of());
+
+        CollectedEvidence evidence = aggregator.aggregate(request(), plan(), execution);
+
+        assertEquals(1, evidence.items().size());
+        EvidenceItem item = evidence.items().get(0);
+        assertEquals("rag:1", item.id());
+        assertEquals("rag_other_chapter", item.type());
+        assertEquals("RAG 片段 1", item.source());
+        assertEquals("有效片段", item.content());
+        assertTrue(evidence.sources().contains("RAG 片段 1"));
+    }
+
+    @Test
+    void evidenceItemDropsNullMetadataEntries() {
+        Map<String, Object> metadata = new java.util.LinkedHashMap<>();
+        metadata.put("ok", true);
+        metadata.put("nullValue", null);
+        metadata.put(null, "nullKey");
+
+        EvidenceItem item = new EvidenceItem("id", "type", "source", "content", 1, 1.0d, metadata);
+
+        assertEquals(Map.of("ok", true), item.metadata());
     }
 
     private AiChatRequest request() {

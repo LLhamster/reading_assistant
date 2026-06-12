@@ -10,7 +10,7 @@ import org.springframework.stereotype.Service;
 public class PlannerPromptBuilder {
     private final ExternalMcpClientService externalMcpClientService;
 
-    public PlannerPromptBuilder(ToolRegistry toolRegistry, ExternalMcpClientService externalMcpClientService) {
+    public PlannerPromptBuilder(ExternalMcpClientService externalMcpClientService) {
         this.externalMcpClientService = externalMcpClientService;
     }
 
@@ -45,45 +45,31 @@ public class PlannerPromptBuilder {
             %s
             
             你的规划目标：
-            1. 判断用户问题属于什么任务。
-            2. 判断是否需要调用工具。
-            3. 从“可调用 MCP server 白名单”中选择本轮允许使用的 MCP server。
-            4. 如果选择 mcp.server:self-local，表示需要本项目内部阅读能力，由后续 ReAct agent 在该 server 内选择 memory/RAG/context 工具。
-            5. 如果选择其他 mcp.server:* 外部 MCP server，只选择 server，不选择 server 内部具体工具。
+            1. 判断用户问题类型、上下文依赖和是否需要工具。
+            2. 从“可调用 MCP server 白名单”中选择 0 个或 1 个 server。
+            3. 如果不需要工具，输出 NO_TOOL。
+            4. 如果需要内部阅读能力，选择 mcp.server:self-local。
+            5. 如果需要 GitHub、网页、实时信息、代码仓库等外部能力，选择匹配的 mcp.server:*。
             6. 决定最终回答阶段的 answerMode、evidenceStrictness 和 answerRequirement。
             
-            工具规划规则：
-            1. 所有 server 选择都必须来自“可调用 MCP server 白名单”。
-            2. mcp.server:self-local 表示本项目内部阅读系统能力，包括 memory、RAG、context；一级 Planner 不直接选择 server 内部工具。
-            3. mcp.server:* 表示一个 MCP server，一级 Planner 只选择 server，不选择 server 内部具体工具。
-            4. 如果是简单问候、感谢、闲聊，使用 NO_TOOL，allowedTools=[]，toolPlan=[]，maxSteps=0。
-            5. 如果问题可以直接回答，且不依赖书籍证据、用户记忆、当前页面、外部事实或实时信息，使用 NO_TOOL。
-            6. 如果问题需要当前页面、划词、最近对话、书籍 RAG 或用户记忆，优先选择 mcp.server:self-local。
-            7. 如果 memoryEnabled=false，不要因为用户记忆需求选择 self-local；除非问题还需要 RAG 或 context。
-            8. 如果 ragEnabled=false，不要因为书籍检索需求选择 self-local；除非问题还需要 memory 或 context。
-            9. 如果用户请求 GitHub、网页、外部搜索、实时信息、最新信息、代码仓库、项目搜索，先查看“可调用 MCP server 白名单”是否有匹配 server。
-            10. 如果匹配某个 MCP server，一级 Planner 只选择 server，不选择具体工具：
-                - executionMode=BOUNDED_REACT
-                - allowedTools=["mcp.server:serverName"]
-                - toolPlan=[]
-                - maxSteps 最大 5
-                后续会由该 server 专属 ReAct agent 查看这个 server 允许的所有工具并逐步调用。
-            11. 如果用户请求 GitHub、网页、外部搜索、实时信息、最新信息，但没有匹配的可用 MCP server，不要改用 self-local 凑数。
-            12. 当用户需要 GitHub/外部搜索/实时查询且没有对应 server 时，输出：
-                - executionMode=NO_TOOL
-                - allowedTools=[]
-                - toolPlan=[]
-                - answerMode=EXTERNAL_SEARCH_REQUIRED
-                - evidenceStrictness=STRICT
-                并在 answerGuidance 中要求最终回答说明当前没有可用外部搜索工具，不能声称已经实时搜索。
-            13. 不要输出白名单之外的 server。
-            14. 不要输出 server 内部具体工具名，例如 memory_search、rag_retrieve、search_repositories 或 external.*。
-            15. allowedTools 只能为空，或者只包含一个 mcp.server:*。
-            16. BOUNDED_REACT 模式下 allowedTools 必须且只能包含一个 mcp.server:*，toolPlan 必须为空。
-            17. 不要为了调用工具而调用工具。
-            18. maxSteps 不能超过 5。
-            19. standaloneQuestion 要尽量把“这里/这个/它/这句话”等指代改写成可独立理解的问题。
-            20. answerGuidance 要告诉最终回答服务如何回答，例如是否需要直接讲故事、是否需要引用证据、是否避免模板化开头、是否区分原文证据和补充解释。
+            工具选择硬规则：
+            1. allowedTools 只能为空，或只包含一个白名单中的 mcp.server:*。
+            2. 一级 Planner 永远不输出 server 内部具体工具名，例如 memory_search、rag_retrieve、search_repositories、external.*。
+            3. 选择任意 mcp.server:* 时：
+               - executionMode=BOUNDED_REACT
+               - allowedTools=["mcp.server:xxx"]
+               - toolPlan=[]
+               - maxSteps<=5
+            4. 不需要工具或缺少合适 server 时：
+               - executionMode=NO_TOOL
+               - allowedTools=[]
+               - toolPlan=[]
+               - maxSteps=0
+            5. self-local 只用于当前页面、划词、最近对话、书籍 RAG、用户记忆等内部阅读能力；memoryEnabled=false 时不要因记忆需求选择它，ragEnabled=false 时不要因书籍检索需求选择它。
+            6. 用户需要 GitHub、网页、外部搜索、实时信息、最新信息、代码仓库时，必须选择匹配的外部 MCP server；如果没有匹配 server，不要用 self-local 凑数。
+            7. 外部能力缺少匹配 server 时，answerMode=EXTERNAL_SEARCH_REQUIRED，evidenceStrictness=STRICT，并在 answerGuidance 中要求说明当前没有实际执行外部搜索。
+            8. standaloneQuestion 要尽量把“这里/这个/它/这句话”等指代改写成独立问题。
+            9. answerGuidance 要说明最终回答应如何处理证据、补充解释、案例、开头风格和重复内容。
             
             taskType 只能是：
             SMALL_TALK, GENERAL_QA, READING_QA, MEMORY_QA, NOTE_QA, READING_PLAN, TOOL_ACTION
@@ -96,15 +82,17 @@ public class PlannerPromptBuilder {
             5. NOTE_QA：明确需要查询用户笔记。
             6. READING_PLAN：制定阅读计划、学习计划。
             7. TOOL_ACTION：需要执行工具动作，包括保存计划、查询外部 MCP server、GitHub 搜索、代码仓库分析等。
+            8. 如果问题本质是阅读理解，但需要 self-local 内部 RAG/context/memory 补充资料，taskType 仍按 READING_QA、MEMORY_QA 或 NOTE_QA 判断。
+            9. 如果问题需要 GitHub、网页、实时信息、代码仓库或外部搜索来补充资料，taskType=TOOL_ACTION，answerMode=EXTERNAL_SEARCH_REQUIRED。
+            10. taskTypeReason 必须说明为什么选择该 taskType，尤其要说明“搜索补资料”属于内部阅读能力还是外部 MCP 能力。
             
             executionMode 只能是：
             NO_TOOL, SINGLE_TOOL, MULTI_TOOL, BOUNDED_REACT
             
             executionMode 选择规则：
-            1. NO_TOOL：不需要工具，或当前缺少合适工具。
-            2. SINGLE_TOOL：保留枚举兼容，一级 Planner 当前不要使用。
-            3. MULTI_TOOL：保留枚举兼容，一级 Planner 当前不要使用。
-            4. BOUNDED_REACT：需要某个 MCP server 进行工具探索。一级 Planner 只选择 server，不生成具体工具步骤。
+            1. NO_TOOL：不需要工具，或当前没有合适 MCP server。
+            2. BOUNDED_REACT：选择某个 MCP server，由后续 ReAct agent 在该 server 内部探索工具。
+            3. SINGLE_TOOL / MULTI_TOOL：保留枚举兼容，一级 Planner 当前不要主动使用。
             
             subIntent 只能是：
             NONE, CONCRETE_EXAMPLE, HISTORICAL_CASE, STORYTELLING_CASE, AVOID_REPEAT_EXPLANATION, DETAIL_REQUIRED, CONTRASTIVE_WHY
@@ -117,24 +105,17 @@ public class PlannerPromptBuilder {
             5. 用户问“既然 A 有问题，为什么还要 B”：CONTRASTIVE_WHY。
             6. 其他情况：NONE。
             
-            answerMode 只能是：
-            TEXT_ONLY, CONTEXT_ANCHORED_MODEL_KNOWLEDGE, EXTERNAL_SEARCH_REQUIRED
-            
-            answerMode 选择规则：
-            1. TEXT_ONLY：
-            适用于用户明确要求只根据原文/资料回答，或问题必须严格依据 collectedEvidence。
-            2. CONTEXT_ANCHORED_MODEL_KNOWLEDGE：
-            适用于“X是什么意思 / 为什么叫X / 如何理解X / 这个词怎么来的 / 能不能说通俗点 / 举个帮助理解的例子”等理解辅助问题。
-            这种模式下最终回答可以使用模型常识补充，但必须区分“当前资料支持的内容”和“补充解释”。
-            3. EXTERNAL_SEARCH_REQUIRED：
-            适用于 GitHub、网页、新闻、最新信息、外部事实核验、实时搜索、代码仓库查询等问题。
+            answerMode：
+            - TEXT_ONLY：用户明确要求只根据原文/资料，或必须严格依据 collectedEvidence。
+            - CONTEXT_ANCHORED_MODEL_KNOWLEDGE：阅读理解、概念解释、原因分析、帮助理解型例子；允许常识补充，但必须区分资料支持和补充解释。
+            - EXTERNAL_SEARCH_REQUIRED：GitHub、网页、新闻、最新信息、代码仓库、外部事实核验等问题。
             
             evidenceStrictness 只能是：
             STRICT, MEDIUM, LOOSE
             
             evidenceStrictness 选择规则：
             1. STRICT：
-            用于外部事实、具体出处、具体历史案例、GitHub 搜索结果、用户明确要求严格依据资料时。
+            用于外部事实核验、具体出处核验、GitHub 搜索结果、网页/实时信息、用户明确要求“只根据资料/必须有出处/不能用常识补充”的场景。
             2. MEDIUM：
             用于普通阅读理解、概念解释、原因分析、类比说明；可以做有限补充，但不能伪造来源。
             3. LOOSE：
@@ -155,9 +136,9 @@ public class PlannerPromptBuilder {
             2. 如果用户要求“完整说出来/详细讲/过程是什么”，requiresDetailedProcess=true。
             3. 如果用户要求“像讲故事一样/完整案例”，requiresStorytelling=true。
             4. 如果用户要求“不要重复前面的解释/换个说法/说新增点”，avoidRepeatingPreviousExplanation=true。
-            5. 如果问题是概念解释，且允许常识辅助，allowModelKnowledge=true。
-            6. 如果 allowModelKnowledge=true，通常 mustDistinguishTextEvidenceAndSupplement=true。
-            7. 如果用户要求直接讲案例，或不适合概念式开头，avoidConceptualOpening=true。
+            5. 如果用户要求直接讲案例，或不适合概念式开头，avoidConceptualOpening=true。
+            6. 如果允许常识补充，allowModelKnowledge=true 且 mustDistinguishTextEvidenceAndSupplement=true。
+            7. 如果问题涉及外部搜索、GitHub、代码仓库、实时信息，allowModelKnowledge=false，evidenceStrictness=STRICT。
             8. 如果用户是在阅读理解语境中要求“举一个实际例子帮助理解”，且没有明确要求“必须来自原文 / 必须有出处 / 联网核验”，应设置：
             - answerMode=CONTEXT_ANCHORED_MODEL_KNOWLEDGE
             - evidenceStrictness=MEDIUM
@@ -167,11 +148,12 @@ public class PlannerPromptBuilder {
             - avoidConceptualOpening=true
             - minDetailLevel=HIGH
             9. 只有当用户明确要求出处、真实性核验、时间地点姓名必须准确，或者问题本身属于外部事实核验时，才使用 evidenceStrictness=STRICT。
-            10. 如果问题涉及外部搜索、GitHub、代码仓库、实时信息，allowModelKnowledge=false，mustDistinguishTextEvidenceAndSupplement=false，evidenceStrictness=STRICT。
+            10. minDetailLevel 只能是 LOW、MEDIUM、HIGH；不要输出 NONE、UNKNOWN、空值或其他枚举。
             
             输出 JSON schema：
             {
               "taskType": "READING_QA",
+              "taskTypeReason": "该问题围绕当前书籍或划词理解，需要内部阅读证据，因此归为 READING_QA",
               "subIntent": "CONCRETE_EXAMPLE",
               "standaloneQuestion": "用户问题改写后的独立问题",
               "dependsOnContext": true,
@@ -201,6 +183,7 @@ public class PlannerPromptBuilder {
 
             字段说明：
             - taskType：用户问题类型。
+            - taskTypeReason：解释为什么选择该 taskType；如果需要搜索补资料，要说明是内部阅读搜索还是外部 MCP 搜索。
             - subIntent：用户的特殊意图。
             - standaloneQuestion：将指代不明的问题改写成独立问题。
             - dependsOnContext：是否依赖当前页面、划词或最近对话。

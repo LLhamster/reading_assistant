@@ -30,7 +30,7 @@ class PlannerServiceTest {
         plannerService = new PlannerService(
             modelClient,
             new ObjectMapper(),
-            new PlannerPromptBuilder(toolRegistry, externalMcpClientService),
+            new PlannerPromptBuilder(externalMcpClientService),
             new PlanValidator(toolRegistry, externalMcpClientService),
             externalMcpClientService);
     }
