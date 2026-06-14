@@ -151,6 +151,12 @@ docker compose up --build
 
 ---
 
+## AI Agent Testing
+
+项目包含离线 mock 回归、Planner/ToolPlanner live 测试和使用 fake MCP 结果的 shadow live 测试。测试分层、安全边界与运行命令见 [docs/AI_TESTING.md](docs/AI_TESTING.md)。
+
+---
+
 ## 项目结构
 
 ```text
@@ -178,4 +184,3 @@ java_src/
 │       ├── domain/
 │       └── dto/
 ```
-
