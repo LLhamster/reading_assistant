@@ -48,6 +48,9 @@ mcp:
         headers: {}
         allowedTools:
           - memory_search
+          - profile_list_categories
+          - profile_get_category_detail
+          - profile_search_relevant
           - rag_retrieve
           - context_get_recent_dialogue
           - context_get_current_page

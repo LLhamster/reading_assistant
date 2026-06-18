@@ -70,6 +70,7 @@ public class PlannerPromptBuilder {
             7. 外部能力缺少匹配 server 时，answerMode=EXTERNAL_SEARCH_REQUIRED，evidenceStrictness=STRICT，并在 answerGuidance 中要求说明当前没有实际执行外部搜索。
             8. standaloneQuestion 要尽量把“这里/这个/它/这句话”等指代改写成独立问题。
             9. answerGuidance 要说明最终回答应如何处理证据、补充解释、案例、开头风格和重复内容。
+            10. 当用户问“按我能理解的方式讲 / 结合我的情况 / 我的阅读特点 / 你根据什么了解我 / 我总是理解不了这类内容”时，可以选择 mcp.server:self-local，让后续工具查询 profile 工具。
             
             taskType 只能是：
             SMALL_TALK, GENERAL_QA, READING_QA, MEMORY_QA, NOTE_QA, READING_PLAN, TOOL_ACTION
@@ -130,6 +131,13 @@ public class PlannerPromptBuilder {
             - answerRequirement.allowModelKnowledge=true
             - answerRequirement.mustDistinguishTextEvidenceAndSupplement=true
             4. 不要因为 RAG 可能为空就默认 TEXT_ONLY + STRICT。
+
+            用户画像工具规则：
+            1. profile.list_categories：用户询问“你知道我的画像有哪些吗 / 我有哪些阅读特点 / 你根据什么了解我”时使用。
+            2. profile.get_category_detail：问题明确需要用户风格画像或某个 bookCategory 的阅读理解画像时使用。
+            3. profile.search_relevant：用户要求“按我能理解的方式讲 / 结合我的情况 / 这个问题怎么给我解释更合适”时使用。
+            4. profile.search_relevant 必须传 standaloneQuestion，不要直接用“这个呢 / 继续 / 再讲讲”等短追问检索。
+            5. profile 结果只用于调整解释方式、深度、例子类型和背景补充方式，不能当作原文证据或事实来源。
             
             answerRequirement 设置规则：
             1. 如果用户要求“举个具体例子/实际例子/案例”，requiresConcreteExample=true。

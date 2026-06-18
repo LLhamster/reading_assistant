@@ -44,6 +44,31 @@ public class ToolRegistry {
             false,
             true));
         register(registry, new AvailableTool(
+            "profile.list_categories",
+            "查询当前用户已有画像类别和摘要，只读。",
+            Map.of("userId", "string", "includeEmpty", "boolean"),
+            true,
+            false,
+            false,
+            true));
+        register(registry, new AvailableTool(
+            "profile.get_category_detail",
+            "查询用户个人风格或某类书籍阅读理解画像详情，只读。",
+            Map.of("userId", "string", "categoryCode", "string", "bookCategory", "string"),
+            true,
+            false,
+            false,
+            true));
+        register(registry, new AvailableTool(
+            "profile.search_relevant",
+            "按独立问题检索相关用户画像片段，用于调整回答风格和解释方式，只读。",
+            Map.of("userId", "string", "query", "string", "standaloneQuestion", "string", "topK", "number",
+                "minScore", "number", "categoryCode", "string", "bookCategory", "string"),
+            true,
+            false,
+            false,
+            true));
+        register(registry, new AvailableTool(
             "rag.search",
             "检索书籍内容证据。",
             Map.of("bookId", "number", "chapterIndex", "number", "query", "string", "topK", "number"),

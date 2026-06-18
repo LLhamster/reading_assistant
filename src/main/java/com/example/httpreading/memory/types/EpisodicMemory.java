@@ -404,6 +404,42 @@ public class EpisodicMemory extends BaseMemory {
     }
 
     @Override
+    public List<MemoryItem> recentImportant(String userId, int limit, double minImportance) {
+        if (docStore == null) {
+            return List.of();
+        }
+        List<Map<String, Object>> docs = docStore.searchMemory(
+            userId,
+            "episodic",
+            null,
+            null,
+            minImportance,
+            limit <= 0 ? 30 : limit);
+        return docs.stream()
+            .map(doc -> {
+                long ts = doc.get("timestamp") instanceof Number number
+                    ? number.longValue()
+                    : LocalDateTime.now().atZone(ZoneId.systemDefault()).toEpochSecond();
+                double importance = doc.get("importance") instanceof Number number
+                    ? number.doubleValue()
+                    : 0.5d;
+                @SuppressWarnings("unchecked")
+                Map<String, Object> metadata = doc.get("properties") instanceof Map<?, ?> raw
+                    ? new HashMap<>((Map<String, Object>) raw)
+                    : new HashMap<>();
+                return new MemoryItem(
+                    Objects.toString(doc.get("memory_id"), ""),
+                    Objects.toString(doc.get("content"), ""),
+                    "episodic",
+                    Objects.toString(doc.get("user_id"), userId),
+                    LocalDateTime.ofInstant(Instant.ofEpochSecond(ts), ZoneId.systemDefault()),
+                    (float) importance,
+                    metadata);
+            })
+            .collect(Collectors.toList());
+    }
+
+    @Override
     public Map<String, Object> getStats() {
         Map<String, Object> stats = new HashMap<>();
         stats.put("memory_type", "episodic");

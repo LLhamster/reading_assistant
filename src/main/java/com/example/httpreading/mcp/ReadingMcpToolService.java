@@ -14,6 +14,7 @@ import com.example.httpreading.memory.model.MemoryItem;
 import com.example.httpreading.service.AgentMemoryService;
 import com.example.httpreading.service.RagService;
 import com.example.httpreading.service.ReadingContextCompactionService;
+import com.example.httpreading.service.profile.UserProfileMcpService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +30,7 @@ public class ReadingMcpToolService {
     private final ContextManager contextManager;
     private final ContextBuilder contextBuilder;
     private final ReadingContextCompactionService readingContextCompactionService;
+    private final UserProfileMcpService userProfileMcpService;
     private final ObjectMapper objectMapper;
 
     @Autowired
@@ -37,12 +39,14 @@ public class ReadingMcpToolService {
                                  ContextManager contextManager,
                                  ContextBuilder contextBuilder,
                                  ReadingContextCompactionService readingContextCompactionService,
+                                 UserProfileMcpService userProfileMcpService,
                                  ObjectMapper objectMapper) {
         this.agentMemoryService = agentMemoryService;
         this.ragService = ragService;
         this.contextManager = contextManager;
         this.contextBuilder = contextBuilder;
         this.readingContextCompactionService = readingContextCompactionService;
+        this.userProfileMcpService = userProfileMcpService;
         this.objectMapper = objectMapper;
     }
 
@@ -52,7 +56,7 @@ public class ReadingMcpToolService {
                                  ContextBuilder contextBuilder,
                                  ObjectMapper objectMapper) {
         this(agentMemoryService, ragService, contextManager, contextBuilder,
-            new ReadingContextCompactionService(), objectMapper);
+            new ReadingContextCompactionService(), null, objectMapper);
     }
 
     public String memorySearch(Map<String, Object> args) {
@@ -92,6 +96,48 @@ public class ReadingMcpToolService {
             question,
             answer);
         return success(Map.of("remembered", true));
+    }
+
+    public String profileListCategories(Map<String, Object> args) {
+        if (userProfileMcpService == null) {
+            return error("profile service unavailable");
+        }
+        return success(userProfileMcpService.listCategories(
+            resolvedUserId(args),
+            readBoolean(args, "includeEmpty", false)));
+    }
+
+    public String profileGetCategoryDetail(Map<String, Object> args) {
+        if (userProfileMcpService == null) {
+            return error("profile service unavailable");
+        }
+        String categoryCode = readString(args, "categoryCode");
+        if (categoryCode.isBlank()) {
+            return error("categoryCode 不能为空");
+        }
+        return success(userProfileMcpService.getCategoryDetail(
+            resolvedUserId(args),
+            categoryCode,
+            readString(args, "bookCategory")));
+    }
+
+    public String profileSearchRelevant(Map<String, Object> args) {
+        if (userProfileMcpService == null) {
+            return error("profile service unavailable");
+        }
+        String query = readString(args, "query");
+        String standaloneQuestion = readString(args, "standaloneQuestion");
+        if (query.isBlank() && standaloneQuestion.isBlank()) {
+            return error("query 不能为空");
+        }
+        return success(userProfileMcpService.searchRelevant(
+            resolvedUserId(args),
+            query,
+            standaloneQuestion,
+            positiveInt(args, "topK", DEFAULT_LIMIT),
+            readDouble(args, "minScore", 0.72d),
+            readString(args, "categoryCode"),
+            readString(args, "bookCategory")));
     }
 
     public String ragRetrieve(Map<String, Object> args) {
@@ -310,6 +356,35 @@ public class ReadingMcpToolService {
     private int positiveInt(Map<String, Object> args, String key, int fallback) {
         Integer value = readInteger(args, key);
         return value == null || value <= 0 ? fallback : value;
+    }
+
+    private boolean readBoolean(Map<String, Object> args, String key, boolean fallback) {
+        if (args == null || key == null || !args.containsKey(key)) {
+            return fallback;
+        }
+        Object value = args.get(key);
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        return value == null ? fallback : Boolean.parseBoolean(value.toString());
+    }
+
+    private double readDouble(Map<String, Object> args, String key, double fallback) {
+        if (args == null || key == null) {
+            return fallback;
+        }
+        Object value = args.get(key);
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        if (value != null && !value.toString().isBlank()) {
+            try {
+                return Double.parseDouble(value.toString());
+            } catch (NumberFormatException ignored) {
+                return fallback;
+            }
+        }
+        return fallback;
     }
 
     private Integer readInteger(Map<String, Object> args, String key) {

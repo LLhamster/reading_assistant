@@ -23,6 +23,12 @@ public class LocalMcpToolAdapter {
                 case "rag.answer", "rag_answer" -> readingMcpToolService.ragAnswer(safeArgs);
                 case "memory.search", "memory_search" -> readingMcpToolService.memorySearch(safeArgs);
                 case "memory.remember_turn", "memory_remember_turn" -> readingMcpToolService.memoryRememberTurn(safeArgs);
+                case "profile.list_categories", "profile_list_categories" ->
+                    readingMcpToolService.profileListCategories(safeArgs);
+                case "profile.get_category_detail", "profile_get_category_detail" ->
+                    readingMcpToolService.profileGetCategoryDetail(safeArgs);
+                case "profile.search_relevant", "profile_search_relevant" ->
+                    readingMcpToolService.profileSearchRelevant(safeArgs);
                 case "context.build", "context_build" -> readingMcpToolService.contextBuild(safeArgs);
                 case "context.get_recent_dialogue", "context_get_recent_dialogue" ->
                     readingMcpToolService.contextGetRecentDialogue(safeArgs);

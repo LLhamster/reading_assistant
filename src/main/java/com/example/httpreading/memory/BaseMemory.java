@@ -37,6 +37,10 @@ public abstract class BaseMemory {
         return List.of();
     }
 
+    public List<MemoryItem> recentImportant(String userId, int limit, double minImportance) {
+        return List.of();
+    }
+
     public Map<String, Object> getStats() {
         return Map.of(
             "memory_type", memoryType,

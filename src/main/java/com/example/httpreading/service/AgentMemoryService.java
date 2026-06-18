@@ -131,6 +131,14 @@ public class AgentMemoryService {
         return manager == null ? Map.of() : manager.getMemoryStats();
     }
 
+    public List<MemoryItem> recentImportantEpisodic(String userId, int limit, double minImportance) {
+        MemoryManager manager = getManager(userId);
+        if (manager == null) {
+            return List.of();
+        }
+        return manager.recentImportant("episodic", limit <= 0 ? 30 : limit, minImportance);
+    }
+
     private MemoryManager getManager(String userId) {
         String resolvedUserId = userId == null || userId.isBlank() ? "default_user" : userId;
         return managers.computeIfAbsent(resolvedUserId, this::createManager);

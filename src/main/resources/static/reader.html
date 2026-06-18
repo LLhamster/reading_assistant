@@ -731,14 +731,33 @@
       color: var(--text-primary);
     }
 
-    .ai-note-btn {
+    .ai-note-btn,
+    .ai-profile-btn {
       border: 1px solid var(--border);
       background: var(--bg-tertiary);
       color: var(--text-secondary);
       border-radius: 8px;
       padding: 6px 10px;
       font-size: 12px;
+    }
+
+    .ai-note-btn {
       cursor: not-allowed;
+    }
+
+    .ai-profile-btn {
+      cursor: pointer;
+    }
+
+    .ai-profile-btn:hover:not(:disabled) {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-light);
+    }
+
+    .ai-profile-btn:disabled {
+      opacity: 0.65;
+      cursor: wait;
     }
 
     .ai-subtitle {
@@ -1215,7 +1234,7 @@
       <div class="ai-panel-header">
         <div class="ai-title-row">
           <div class="ai-title">阅读 Agent</div>
-          <button class="ai-note-btn" title="笔记功能后续接入">笔记预留</button>
+          <button id="aiProfileUpdateBtn" class="ai-profile-btn" onclick="updateUserProfile()" title="更新用户画像">更新画像</button>
         </div>
         <div class="ai-subtitle">围绕当前章节提问，结合阅读上下文、记忆与书籍片段回答。</div>
         <div class="ai-session" id="aiSessionLabel">未选择书籍</div>
@@ -1336,6 +1355,7 @@ let aiSessionId = null;
 let aiContextId = null;
 let aiMessages = [];
 let aiLoading = false;
+let profileUpdating = false;
 let selectedReadingContext = null;
 const guestUserId = 'guest_' + Date.now();
 const defaultReaderStyle = { fontSize: 16, lineHeight: '2', font: 'serif' };
@@ -1779,11 +1799,16 @@ function updateAiPanelState(chapterTitle) {
   const sendBtn = document.getElementById('aiSendBtn');
   const label = document.getElementById('aiSessionLabel');
   const hint = document.getElementById('aiInputHint');
+  const profileBtn = document.getElementById('aiProfileUpdateBtn');
   if (!input || !sendBtn || !label || !hint) return;
 
   const hasBook = !!currentBookId;
   input.disabled = !hasBook || aiLoading;
   sendBtn.disabled = !hasBook || aiLoading;
+  if (profileBtn) {
+    profileBtn.disabled = profileUpdating;
+    profileBtn.textContent = profileUpdating ? '更新中' : '更新画像';
+  }
   input.placeholder = hasBook ? '围绕当前章节提问...' : '先选择一本书，然后向我提问...';
   label.textContent = hasBook
     ? '当前：书籍 ' + currentBookId + ' · 第 ' + currentChapterIndex + ' 章' + (visibleChapterTitle ? ' · ' + visibleChapterTitle : '')
@@ -1911,6 +1936,41 @@ async function sendAiQuestion() {
     });
   } finally {
     aiLoading = false;
+    renderAiMessages();
+  }
+}
+
+async function updateUserProfile() {
+  if (profileUpdating) return;
+  profileUpdating = true;
+  renderAiMessages();
+  try {
+    const userId = hasAuthUser() && currentUser.id != null ? String(currentUser.id) : null;
+    const sessionId = aiSessionId || (currentBookId ? ('book_' + currentBookId + '_chapter_' + currentChapterIndex) : 'reader_guest');
+    const resp = await api('POST', '/api/profile/update', {
+      userId,
+      sessionId,
+      bookId: currentBookId,
+      chapterIndex: currentChapterIndex,
+      question: ''
+    });
+    let content = (resp && resp.summary) ? resp.summary : '用户画像更新完成。';
+    if (resp && resp.status === 'not_enough_memory') {
+      content = '最近重要记忆不足，继续阅读问答后再更新画像。';
+    } else if (resp && resp.changes && resp.changes.length) {
+      content += '\n\n' + resp.changes.map(item => '- ' + item).join('\n');
+    }
+    if (resp && resp.warnings && resp.warnings.length) {
+      content += '\n\n提示：画像已写入，但向量索引同步未完全成功，后续可以重试。';
+    }
+    aiMessages.push({ role: 'assistant', content });
+  } catch (e) {
+    aiMessages.push({
+      role: 'error',
+      content: '画像更新失败：' + (e && e.message ? e.message : '请稍后重试')
+    });
+  } finally {
+    profileUpdating = false;
     renderAiMessages();
   }
 }

@@ -86,6 +86,15 @@ public class EvidenceAggregator {
         if ("memory.search".equals(tool) || "memory_search".equals(tool)) {
             return memoryItems(data);
         }
+        if ("profile.list_categories".equals(tool) || "profile_list_categories".equals(tool)) {
+            return profileCategoryItems(data);
+        }
+        if ("profile.get_category_detail".equals(tool) || "profile_get_category_detail".equals(tool)) {
+            return profileDetailItems(data);
+        }
+        if ("profile.search_relevant".equals(tool) || "profile_search_relevant".equals(tool)) {
+            return profileSearchItems(data);
+        }
         return externalItem(result, plan);
     }
 
@@ -166,6 +175,71 @@ public class EvidenceAggregator {
         return items;
     }
 
+    private List<EvidenceItem> profileCategoryItems(Object data) {
+        if (!(data instanceof List<?> list) || list.isEmpty()) {
+            return List.of();
+        }
+        return List.of(new EvidenceItem(
+            "profile:categories",
+            "profile_category",
+            "用户画像类别",
+            truncate(writeLoose(data), 1600),
+            55,
+            0.65d,
+            Map.of("usage", "style_guidance")));
+    }
+
+    private List<EvidenceItem> profileDetailItems(Object data) {
+        Map<String, Object> detail = objectMap(data);
+        if (detail.isEmpty()) {
+            return List.of();
+        }
+        Map<String, Object> metadata = new LinkedHashMap<>(detail);
+        metadata.put("usage", "style_guidance");
+        return List.of(new EvidenceItem(
+            "profile:detail:" + normalize(writeLoose(detail)).hashCode(),
+            "profile_detail",
+            "用户画像详情",
+            truncate(writeLoose(detail), 2200),
+            55,
+            0.75d,
+            metadata));
+    }
+
+    private List<EvidenceItem> profileSearchItems(Object data) {
+        Map<String, Object> root = objectMap(data);
+        Object matchedValue = root.get("matched");
+        boolean matched = matchedValue instanceof Boolean bool ? bool : Boolean.parseBoolean(String.valueOf(matchedValue));
+        if (!matched) {
+            return List.of();
+        }
+        Object items = root.get("items");
+        if (!(items instanceof List<?> list) || list.isEmpty()) {
+            return List.of();
+        }
+        List<EvidenceItem> result = new ArrayList<>();
+        int index = 1;
+        for (Object item : list) {
+            Map<String, Object> profile = objectMap(item);
+            String summary = stringValue(profile, "summary");
+            if (summary.isBlank()) {
+                summary = writeLoose(profile);
+            }
+            Map<String, Object> metadata = new LinkedHashMap<>(profile);
+            metadata.put("usage", "style_guidance");
+            result.add(new EvidenceItem(
+                "profile:search:" + index + ":" + normalize(summary).hashCode(),
+                "profile_search_result",
+                "相关用户画像",
+                truncate(summary + "\n" + writeLoose(profile.get("detail")), 2200),
+                55,
+                doubleValue(profile.get("score"), 0.72d),
+                metadata));
+            index++;
+        }
+        return result;
+    }
+
     private List<EvidenceItem> externalItem(ExternalMcpCallResult result, ChatPlan plan) {
         String content = truncate(result.getContent(), MAX_EXTERNAL_RESULT_CHARS);
         if (content.isBlank()) {
@@ -239,10 +313,24 @@ public class EvidenceAggregator {
         for (EvidenceItem item : items) {
             builder.append("【证据").append(index).append("】")
                 .append(item.source()).append("\n")
+                .append("type=").append(item.type());
+            Object usage = item.metadata() == null ? null : item.metadata().get("usage");
+            if (usage != null) {
+                builder.append(", usage=").append(usage);
+            }
+            builder.append("\n")
                 .append(item.content()).append("\n\n");
             index++;
         }
         return builder.toString();
+    }
+
+    private String writeLoose(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException exception) {
+            return String.valueOf(value);
+        }
     }
 
     private Map<String, Object> parseObject(String content) {

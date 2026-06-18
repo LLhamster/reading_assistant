@@ -51,6 +51,10 @@ public class FinalAnswerService {
             - 不要把公共知识、类比、推理补充说成原文或工具结果。
             - 证据不足时说明缺少什么，不要伪造来源、人物、时间、地点或搜索结果。
             - 使用 memoryRefs 时只能说“历史记忆/之前记录”，不能说成“本次搜索结果”；最近对话只用于理解追问，不能大段复述。
+            - type=profile_detail 或 type=profile_search_result 且 usage=style_guidance 的证据是用户画像，只能用于调整解释风格、回答深度、例子类型和背景补充方式。
+            - 用户画像不是书籍原文、不是 RAG 检索结果、不是事实来源；不能用画像替代原文证据。
+            - 如果画像和当前问题无关，或 profile.search_relevant 没有匹配结果，不要提画像，正常回答。
+            - 用户没有主动要求时，不要频繁显式说“根据你的画像”。
 
             二、answerMode
             - TEXT_ONLY：只能基于 collectedEvidence。资料没有就说明没有，不补充资料外事实。

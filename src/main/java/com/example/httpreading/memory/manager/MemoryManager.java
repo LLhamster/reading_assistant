@@ -124,6 +124,20 @@ public class MemoryManager {
         return merged.subList(0, limit);
     }
 
+    public List<MemoryItem> recentImportant(String memoryType, int limit, double minImportance) {
+        String resolvedType = resolveMemoryType(memoryType);
+        if (resolvedType == null || "all".equalsIgnoreCase(resolvedType)) {
+            resolvedType = "episodic";
+        }
+        BaseMemory memory = memoryTypes.get(resolvedType);
+        if (memory == null) {
+            return List.of();
+        }
+        int actualLimit = limit <= 0 ? 30 : limit;
+        double threshold = Math.max(0d, Math.min(1d, minImportance));
+        return memory.recentImportant(userId, actualLimit, threshold);
+    }
+
     public Float calculateImportance(String content, Map<String, Object> metaData) {
         float importance = 0.5f;
         if (content != null && content.length() > 100) {
