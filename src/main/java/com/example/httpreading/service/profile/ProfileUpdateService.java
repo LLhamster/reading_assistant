@@ -260,6 +260,9 @@ public class ProfileUpdateService {
             if (!bookCategoryService.isAllowed(reading.bookCategory())) {
                 throw new IllegalArgumentException("readingPatches.bookCategory 必须属于固定枚举: " + reading.bookCategory());
             }
+            if (isStylePreferenceReadingPatch(reading)) {
+                continue;
+            }
             readings.add(new ReadingProfilePatch(
                 bookCategoryService.normalize(reading.bookCategory()),
                 reading.understandingLevel(),
@@ -278,6 +281,10 @@ public class ProfileUpdateService {
             String category = "reading_understanding".equals(domain)
                 ? bookCategoryService.normalize(evidence.bookCategory())
                 : null;
+            if ("reading_understanding".equals(domain) && isStylePreferenceText(evidence.content())) {
+                domain = "style";
+                category = null;
+            }
             evidences.add(new NewEvidencePatch(domain, evidence.evidenceType(), category,
                 evidence.content(), evidence.importance(), evidence.relatedBookId(),
                 evidence.relatedBookTitle(), evidence.relatedChapterIndex()));
@@ -305,16 +312,24 @@ public class ProfileUpdateService {
             当前相关 bookCategory 默认值：%s
             不要生成复杂 domain，不要记录 bookId、chapterIndex、question、answer、currentChapterIndex、readingProgress、readingStatus，不要因为一次记忆大幅改变画像。
 
+            画像边界必须严格遵守：
+            - user_style_profile/stylePatch 记录用户喜欢怎样被解释：完整案例、背景解释、直接进入故事、最后回扣原文观点、不喜欢教科书式/空泛/模板化回答。
+            - reading_understanding_profile/readingPatches 只记录用户对某类书籍的知识理解状态：理解程度、掌握了哪些概念/能力、哪些知识点薄弱、是否能理解抽象概念、是否能把概念和案例对应、是否能总结作者观点、是否具备批判性理解或迁移应用能力。
+            - readingPatches 禁止输出“偏好完整案例和背景解释/直接进入故事/最后回扣原文观点/需要通俗解释”等回答方式偏好。
+            - readingPatches 的 strengths、weaknesses、summary 必须描述知识理解状态，而不是回答风格偏好。
+            - 如果情景记忆只体现用户偏好解释方式，没有体现知识掌握程度，只更新 stylePatch，不生成 readingPatch。
+            - 与回答方式有关的 newEvidence 必须使用 evidenceDomain="style"。
+
             输出 JSON schema 必须是：
             {
               "stylePatch": {
-                "explanationStyle": "通俗、具体",
+                "explanationStyle": "通俗、具体、案例化、补充背景",
                 "preferredDepth": "medium_to_detailed",
                 "prefersExamples": true,
-                "prefersStorytelling": false,
+                "prefersStorytelling": true,
                 "prefersStepByStep": true,
-                "avoidance": ["教科书式回答"],
-                "summary": "用户偏好通俗、具体、带例子的解释。",
+                "avoidance": ["教科书式回答", "空泛总结", "模板化开头"],
+                "summary": "用户偏好完整案例、背景解释、直接进入故事，并希望最后回扣原文观点。",
                 "confidenceDelta": 0.1
               },
               "readingPatches": [
@@ -322,21 +337,21 @@ public class ProfileUpdateService {
                   "bookCategory": "%s",
                   "understandingLevel": "learning",
                   "learningStage": "case_mapping",
-                  "strengths": ["能识别回答是否空泛"],
-                  "weaknesses": ["抽象概念需要具体案例支撑"],
-                  "preferredExplanation": ["直接进入故事", "最后回扣原文观点"],
-                  "backgroundNeeds": ["历史背景"],
-                  "typicalQuestions": ["能否举一个实际例子"],
-                  "summary": "用户阅读这类书籍时偏好完整案例和背景解释。",
+                  "strengths": ["能识别某个社会学概念与原文观点之间的关系"],
+                  "weaknesses": ["对抽象概念的边界仍不稳定", "需要练习把案例对应到概念"],
+                  "preferredExplanation": [],
+                  "backgroundNeeds": [],
+                  "typicalQuestions": ["这个概念和案例如何对应", "作者观点可以怎样概括"],
+                  "summary": "用户对社会学类书籍处于概念理解到案例映射阶段，正在学习把抽象概念、案例和作者观点对应起来。",
                   "confidenceDelta": 0.1
                 }
               ],
               "newEvidence": [
                 {
-                  "evidenceDomain": "reading_understanding",
-                  "evidenceType": "case_need",
-                  "bookCategory": "%s",
-                  "content": "用户阅读这类内容时需要完整案例和背景解释。",
+                  "evidenceDomain": "style",
+                  "evidenceType": "explanation_preference",
+                  "bookCategory": null,
+                  "content": "用户要求完整案例、背景解释，并希望最后回扣原文观点。",
                   "importance": 0.82,
                   "relatedBookId": %s,
                   "relatedBookTitle": "",
@@ -392,30 +407,29 @@ public class ProfileUpdateService {
             - readingPatches 只能是画像字段对象数组，禁止 bookId/chapterIndex/question/answer/readingProgress/currentChapterIndex。
             - newEvidence 必须是对象数组，不能是字符串数组。
             - bookCategory 只能是：社会学、技术、历史、文学、哲学、心理学、英语、职业成长、经济学、其他。
+            - 回答方式偏好必须进入 stylePatch/newEvidence(evidenceDomain=style)，不要写入 readingPatches。
+            - readingPatches 只描述知识理解状态，不描述“喜欢完整案例/背景解释/直接进入故事/回扣原文观点”。
+            - 如果只有解释偏好证据，readingPatches 输出 []。
 
             目标 schema：
             {
-              "stylePatch": null,
-              "readingPatches": [
-                {
-                  "bookCategory": "社会学",
-                  "understandingLevel": "learning",
-                  "learningStage": "case_mapping",
-                  "strengths": ["..."],
-                  "weaknesses": ["..."],
-                  "preferredExplanation": ["..."],
-                  "backgroundNeeds": ["..."],
-                  "typicalQuestions": ["..."],
-                  "summary": "...",
-                  "confidenceDelta": 0.1
-                }
-              ],
+              "stylePatch": {
+                "explanationStyle": "通俗、具体、案例化、补充背景",
+                "preferredDepth": "medium_to_detailed",
+                "prefersExamples": true,
+                "prefersStorytelling": true,
+                "prefersStepByStep": true,
+                "avoidance": ["教科书式回答", "空泛总结", "模板化开头"],
+                "summary": "用户偏好完整案例、背景解释、直接进入故事，并希望最后回扣原文观点。",
+                "confidenceDelta": 0.1
+              },
+              "readingPatches": [],
               "newEvidence": [
                 {
-                  "evidenceDomain": "reading_understanding",
-                  "evidenceType": "case_need",
-                  "bookCategory": "社会学",
-                  "content": "用户阅读社会学类内容时需要完整案例和背景解释。",
+                  "evidenceDomain": "style",
+                  "evidenceType": "explanation_preference",
+                  "bookCategory": null,
+                  "content": "用户要求完整案例和背景解释。",
                   "importance": 0.82,
                   "relatedBookId": 44,
                   "relatedBookTitle": "",
@@ -505,6 +519,51 @@ public class ProfileUpdateService {
             return "explanation_preference";
         }
         return value.trim();
+    }
+
+    private boolean isStylePreferenceReadingPatch(ReadingProfilePatch reading) {
+        String text = String.join(" ",
+            safeJoin(reading.strengths()),
+            safeJoin(reading.weaknesses()),
+            safeJoin(reading.preferredExplanation()),
+            safeJoin(reading.backgroundNeeds()),
+            safeJoin(reading.typicalQuestions()),
+            reading.summary() == null ? "" : reading.summary());
+        return isStylePreferenceText(text) && !hasUnderstandingSignal(text);
+    }
+
+    private boolean isStylePreferenceText(String text) {
+        String value = text == null ? "" : text;
+        return value.contains("完整案例")
+            || value.contains("具体案例")
+            || value.contains("背景解释")
+            || value.contains("直接进入故事")
+            || value.contains("最后回扣")
+            || value.contains("回扣原文")
+            || value.contains("通俗")
+            || value.contains("教科书式")
+            || value.contains("模板化")
+            || value.contains("空泛");
+    }
+
+    private boolean hasUnderstandingSignal(String text) {
+        String value = text == null ? "" : text;
+        return value.contains("理解程度")
+            || value.contains("掌握")
+            || value.contains("概念边界")
+            || value.contains("概念和案例")
+            || value.contains("知识点")
+            || value.contains("作者观点")
+            || value.contains("批判")
+            || value.contains("迁移")
+            || value.contains("应用")
+            || value.contains("区分")
+            || value.contains("总结")
+            || value.contains("对应起来");
+    }
+
+    private String safeJoin(List<String> values) {
+        return values == null ? "" : String.join(" ", values);
     }
 
     private record ParsedProfilePatch(ProfileUpdatePatch patch, String rawJson) {

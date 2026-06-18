@@ -806,7 +806,8 @@
     }
 
     .ai-message.user .ai-bubble,
-    .ai-message.error .ai-bubble {
+    .ai-message.error .ai-bubble,
+    .ai-message.system .ai-bubble {
       white-space: pre-wrap;
     }
 
@@ -857,6 +858,13 @@
       background: #fff3f0;
       color: #9b3d24;
       border: 1px solid #f1c4b7;
+    }
+
+    .ai-message.system .ai-bubble {
+      background: #f7fbf8;
+      color: var(--text-primary);
+      border: 1px solid #cfe8d5;
+      border-bottom-left-radius: 4px;
     }
 
     .ai-meta-block {
@@ -1807,7 +1815,7 @@ function updateAiPanelState(chapterTitle) {
   sendBtn.disabled = !hasBook || aiLoading;
   if (profileBtn) {
     profileBtn.disabled = profileUpdating;
-    profileBtn.textContent = profileUpdating ? '更新中' : '更新画像';
+    profileBtn.textContent = profileUpdating ? '更新中...' : '更新画像';
   }
   input.placeholder = hasBook ? '围绕当前章节提问...' : '先选择一本书，然后向我提问...';
   label.textContent = hasBook
@@ -1822,7 +1830,7 @@ function renderAiMessages() {
   const box = document.getElementById('aiMessages');
   if (!box) return;
 
-  if (!currentBookId) {
+  if (!currentBookId && aiMessages.length === 0) {
     box.innerHTML = '<div class="ai-empty"><div class="ai-empty-title">选择一本书开始</div><div>打开章节后，可以在这里向阅读 Agent 提问。</div></div>';
     updateAiPanelState();
     return;
@@ -1946,7 +1954,9 @@ async function updateUserProfile() {
   renderAiMessages();
   try {
     const userId = hasAuthUser() && currentUser.id != null ? String(currentUser.id) : null;
-    const sessionId = aiSessionId || (currentBookId ? ('book_' + currentBookId + '_chapter_' + currentChapterIndex) : 'reader_guest');
+    const sessionId = hasAuthUser()
+      ? (aiSessionId || guestUserId)
+      : guestUserId;
     const resp = await api('POST', '/api/profile/update', {
       userId,
       sessionId,
@@ -1954,19 +1964,28 @@ async function updateUserProfile() {
       chapterIndex: currentChapterIndex,
       question: ''
     });
-    let content = (resp && resp.summary) ? resp.summary : '用户画像更新完成。';
+    let content = '画像更新完成';
     if (resp && resp.status === 'not_enough_memory') {
       content = '最近重要记忆不足，继续阅读问答后再更新画像。';
-    } else if (resp && resp.changes && resp.changes.length) {
-      content += '\n\n' + resp.changes.map(item => '- ' + item).join('\n');
+    } else {
+      if (resp && resp.summary) {
+        content += '\n\n' + resp.summary;
+      }
+      if (resp && resp.changes && resp.changes.length) {
+        content += '\n\n更新内容：\n' + resp.changes.map(item => '- ' + item).join('\n');
+      }
+      if (resp && resp.warnings && resp.warnings.length) {
+        const hasSyncFailed = resp.warnings.some(item => String(item || '').includes('sync_failed'));
+        content += '\n\n提醒：\n';
+        content += hasSyncFailed
+          ? '- 画像已更新，但向量索引同步失败，后续可重试。'
+          : resp.warnings.map(item => '- ' + item).join('\n');
+      }
     }
-    if (resp && resp.warnings && resp.warnings.length) {
-      content += '\n\n提示：画像已写入，但向量索引同步未完全成功，后续可以重试。';
-    }
-    aiMessages.push({ role: 'assistant', content });
+    aiMessages.push({ role: 'system', content });
   } catch (e) {
     aiMessages.push({
-      role: 'error',
+      role: 'system',
       content: '画像更新失败：' + (e && e.message ? e.message : '请稍后重试')
     });
   } finally {

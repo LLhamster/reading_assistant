@@ -145,6 +145,17 @@ class ProfileUpdateServiceTest {
         verify(updateLogRepository, never()).save(any());
     }
 
+    @Test
+    void stylePreferenceReadingPatchIsSkippedAndOnlyStyleUpdates() {
+        when(modelClient.chat(anyString())).thenReturn(styleOnlyPatchWithMisplacedReadingPatch());
+
+        var response = service.updateProfileManually(request());
+
+        assertEquals("success", response.status());
+        verify(styleProfileService).updateStyleProfile(anyString(), any());
+        verify(readingProfileService, never()).updateReadingProfile(anyString(), anyString(), any(), any());
+    }
+
     private ProfileUpdateRequest request() {
         return new ProfileUpdateRequest("u1", "s1", 44L, 1, "社会学", "请完整举例");
     }
@@ -193,11 +204,55 @@ class ProfileUpdateServiceTest {
                   "understandingLevel": "learning",
                   "learningStage": "case_mapping",
                   "strengths": ["能识别回答是否空泛"],
+                  "weaknesses": ["对社会学概念边界仍不稳定"],
+                  "preferredExplanation": [],
+                  "backgroundNeeds": [],
+                  "typicalQuestions": ["这个概念和案例如何对应"],
+                  "summary": "用户对社会学类内容处于概念理解到案例映射阶段。",
+                  "confidenceDelta": 0.1
+                }
+              ],
+              "newEvidence": [
+                {
+                  "evidenceDomain": "reading_understanding",
+                  "evidenceType": "concept_confusion",
+                  "bookCategory": "社会学",
+                  "content": "用户对社会学概念边界仍不稳定，正在练习把概念和案例对应起来。",
+                  "importance": 0.82,
+                  "relatedBookId": 44,
+                  "relatedBookTitle": "测试书",
+                  "relatedChapterIndex": 1
+                }
+              ],
+              "summary": "更新社会学阅读理解画像"
+            }
+            """;
+    }
+
+    private String styleOnlyPatchWithMisplacedReadingPatch() {
+        return """
+            {
+              "stylePatch": {
+                "explanationStyle": "通俗、具体、案例化、补充背景",
+                "preferredDepth": "medium_to_detailed",
+                "prefersExamples": true,
+                "prefersStorytelling": true,
+                "prefersStepByStep": true,
+                "avoidance": ["教科书式回答", "空泛总结"],
+                "summary": "用户偏好完整案例、背景解释、直接进入故事，并希望最后回扣原文观点。",
+                "confidenceDelta": 0.1
+              },
+              "readingPatches": [
+                {
+                  "bookCategory": "社会学",
+                  "understandingLevel": "learning",
+                  "learningStage": "case_mapping",
+                  "strengths": ["能识别回答是否空泛"],
                   "weaknesses": ["抽象概念需要具体案例支撑"],
-                  "preferredExplanation": ["直接进入故事"],
+                  "preferredExplanation": ["直接进入故事", "最后回扣原文观点"],
                   "backgroundNeeds": ["历史背景"],
                   "typicalQuestions": ["能否举一个实际例子"],
-                  "summary": "用户阅读社会学类内容时需要完整案例和背景解释。",
+                  "summary": "用户阅读社会学类书籍时偏好完整案例和背景解释。",
                   "confidenceDelta": 0.1
                 }
               ],
@@ -206,14 +261,11 @@ class ProfileUpdateServiceTest {
                   "evidenceDomain": "reading_understanding",
                   "evidenceType": "case_need",
                   "bookCategory": "社会学",
-                  "content": "用户阅读社会学类内容时需要完整案例和背景解释。",
-                  "importance": 0.82,
-                  "relatedBookId": 44,
-                  "relatedBookTitle": "测试书",
-                  "relatedChapterIndex": 1
+                  "content": "用户要求完整案例和背景解释。",
+                  "importance": 0.82
                 }
               ],
-              "summary": "更新社会学阅读理解画像"
+              "summary": "更新用户解释风格"
             }
             """;
     }
