@@ -1,5 +1,7 @@
 package com.example.httpreading.service.profile;
 
+import java.util.Optional;
+
 import com.example.httpreading.domain.profile.UserStyleProfile;
 import com.example.httpreading.dto.profile.ProfileDtos.StyleProfilePatch;
 import com.example.httpreading.repository.UserStyleProfileRepository;
@@ -25,6 +27,10 @@ public class UserStyleProfileService {
             profile.setConfidence(0.5d);
             return repository.save(profile);
         });
+    }
+
+    public Optional<UserStyleProfile> findByUserId(String userId) {
+        return repository.findByUserId(userId);
     }
 
     @Transactional

@@ -11,6 +11,7 @@ import org.springframework.http.MediaType;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -456,11 +457,22 @@ public class QdrantStore {
 	}
 
 	private Object toSafeQdrantId(String pointId) {
-		// Preserve provided pointId so MySQL and Qdrant IDs remain consistent.
 		if (pointId == null || pointId.isBlank()) {
 			return UUID.randomUUID().toString();
 		}
-		return pointId;
+		String trimmed = pointId.trim();
+		if (trimmed.matches("\\d+")) {
+			try {
+				return Long.parseUnsignedLong(trimmed);
+			} catch (NumberFormatException ignored) {
+				return UUID.nameUUIDFromBytes(trimmed.getBytes(StandardCharsets.UTF_8)).toString();
+			}
+		}
+		try {
+			return UUID.fromString(trimmed).toString();
+		} catch (IllegalArgumentException ignored) {
+			return UUID.nameUUIDFromBytes(trimmed.getBytes(StandardCharsets.UTF_8)).toString();
+		}
 	}
 
 	private void normalizeExternal(Map<String, Object> payload) {

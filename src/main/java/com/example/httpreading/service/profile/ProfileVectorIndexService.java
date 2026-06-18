@@ -56,6 +56,7 @@ public class ProfileVectorIndexService {
         metadata.put("userId", profile.getUserId());
         metadata.put("sourceType", "user_style_profile");
         metadata.put("sourceId", profile.getId());
+        metadata.put("vectorId", vectorId);
         metadata.put("categoryCode", "style");
         metadata.put("status", "active");
         metadata.put("summary", text == null ? "" : text);
@@ -69,6 +70,7 @@ public class ProfileVectorIndexService {
         metadata.put("userId", profile.getUserId());
         metadata.put("sourceType", "reading_understanding_profile");
         metadata.put("sourceId", profile.getId());
+        metadata.put("vectorId", vectorId);
         metadata.put("categoryCode", "reading_understanding");
         metadata.put("bookCategory", profile.getBookCategory());
         metadata.put("status", "active");
@@ -82,6 +84,7 @@ public class ProfileVectorIndexService {
         metadata.put("userId", evidence.getUserId());
         metadata.put("sourceType", "profile_growth_evidence");
         metadata.put("sourceId", evidence.getId());
+        metadata.put("vectorId", vectorId);
         metadata.put("categoryCode", evidence.getEvidenceDomain());
         metadata.put("bookCategory", evidence.getBookCategory());
         metadata.put("evidenceType", evidence.getEvidenceType());

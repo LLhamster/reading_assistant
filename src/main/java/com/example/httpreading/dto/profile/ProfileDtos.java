@@ -93,7 +93,10 @@ public final class ProfileDtos {
         String evidenceType,
         String bookCategory,
         String content,
-        Double importance) {
+        Double importance,
+        Long relatedBookId,
+        String relatedBookTitle,
+        Integer relatedChapterIndex) {
     }
 
     public record ProfileUpdatePatch(

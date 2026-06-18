@@ -22,6 +22,9 @@ import com.example.httpreading.repository.ProfileUpdateLogRepository;
 import com.example.httpreading.service.AgentMemoryService;
 import com.example.httpreading.service.ModelClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -91,15 +94,26 @@ public class ProfileUpdateService {
                 memories.size());
         }
 
-        UserStyleProfile oldStyle = styleProfileService.getOrCreate(userId);
+        UserStyleProfile oldStyle = styleProfileService.findByUserId(userId).orElse(null);
         List<ReadingUnderstandingProfile> oldReadings = readingProfileService.listByUser(userId);
         String oldStyleSnapshot = profileJson.writeObject(profileMapper.toDto(oldStyle));
         String oldReadingSnapshot = profileJson.writeObject(oldReadings.stream().map(profileMapper::toDto).toList());
         String resolvedCategory = bookCategoryService.resolve(request == null ? null : request.bookId(),
             request == null ? null : request.bookCategory());
 
-        String rawPatch = modelClient.chat(buildPatchPrompt(memories, oldStyleSnapshot, oldReadingSnapshot, resolvedCategory, request));
-        ProfileUpdatePatch patch = parseAndValidatePatch(rawPatch, resolvedCategory);
+        String patchPrompt = buildPatchPrompt(memories, oldStyleSnapshot, oldReadingSnapshot, resolvedCategory, request);
+        String rawPatch = modelClient.chat(patchPrompt);
+        ParsedProfilePatch parsedPatch = parsePatchWithRetry(rawPatch, patchPrompt, resolvedCategory);
+        if (parsedPatch == null) {
+            return new ProfileUpdateResponse(
+                "profile_patch_parse_failed",
+                userId,
+                "模型画像 patch 解析失败，未写入数据库。",
+                List.of(),
+                List.of("profile_patch_parse_failed"),
+                memories.size());
+        }
+        ProfileUpdatePatch patch = parsedPatch.patch();
 
         List<ProfileGrowthEvidence> savedEvidence = saveEvidence(userId, patch, request);
         Map<String, Long> evidenceByCategory = new LinkedHashMap<>();
@@ -113,7 +127,10 @@ public class ProfileUpdateService {
             }
         }
 
-        UserStyleProfile newStyle = styleProfileService.updateStyleProfile(userId, patch.stylePatch());
+        UserStyleProfile newStyle = oldStyle;
+        if (patch.stylePatch() != null) {
+            newStyle = styleProfileService.updateStyleProfile(userId, patch.stylePatch());
+        }
         List<ReadingUnderstandingProfile> changedReadings = new ArrayList<>();
         for (ReadingProfilePatch readingPatch : patch.readingPatches() == null ? List.<ReadingProfilePatch>of() : patch.readingPatches()) {
             String category = bookCategoryService.normalize(readingPatch.bookCategory());
@@ -125,7 +142,7 @@ public class ProfileUpdateService {
         }
 
         List<String> warnings = new ArrayList<>();
-        if (!vectorIndexService.upsertStyleStateVector(newStyle)) {
+        if (newStyle != null && !vectorIndexService.upsertStyleStateVector(newStyle)) {
             warnings.add("sync_failed:style");
         }
         for (ReadingUnderstandingProfile reading : changedReadings) {
@@ -145,7 +162,7 @@ public class ProfileUpdateService {
         updateLog.setOldReadingSnapshot(oldReadingSnapshot);
         updateLog.setNewStyleSnapshot(profileJson.writeObject(profileMapper.toDto(newStyle)));
         updateLog.setNewReadingSnapshot(profileJson.writeObject(readingProfileService.listByUser(userId).stream().map(profileMapper::toDto).toList()));
-        updateLog.setUpdatePatch(rawPatch);
+        updateLog.setUpdatePatch(parsedPatch.rawJson());
         updateLog.setUsedMemoryIds(profileJson.writeObject(memories.stream().map(MemoryItem::getId).toList()));
         updateLog.setUsedEvidenceIds(profileJson.writeObject(savedEvidence.stream().map(ProfileGrowthEvidence::getId).toList()));
         updateLog.setUpdateReason(patch.summary());
@@ -199,7 +216,15 @@ public class ProfileUpdateService {
             if (request != null) {
                 evidence.setRelatedBookId(request.bookId());
                 evidence.setRelatedChapterIndex(request.chapterIndex());
-                if (request.bookId() != null) {
+                if (item.relatedBookId() != null) {
+                    evidence.setRelatedBookId(item.relatedBookId());
+                }
+                if (item.relatedChapterIndex() != null) {
+                    evidence.setRelatedChapterIndex(item.relatedChapterIndex());
+                }
+                if (item.relatedBookTitle() != null && !item.relatedBookTitle().isBlank()) {
+                    evidence.setRelatedBookTitle(item.relatedBookTitle());
+                } else if (request.bookId() != null) {
                     booksRepository.findById(request.bookId()).map(Books::getTitle).ifPresent(evidence::setRelatedBookTitle);
                 }
             }
@@ -208,45 +233,58 @@ public class ProfileUpdateService {
         return saved;
     }
 
-    private ProfileUpdatePatch parseAndValidatePatch(String rawPatch, String fallbackCategory) {
-        String normalized = stripCodeFence(rawPatch);
-        if (containsForbiddenField(normalized)) {
-            throw new IllegalArgumentException("画像 patch 包含禁止的阅读进度字段");
-        }
+    private ParsedProfilePatch parsePatchWithRetry(String rawPatch, String originalPrompt, String fallbackCategory) {
         try {
-            ProfileUpdatePatch patch = objectMapper.readValue(normalized, ProfileUpdatePatch.class);
-            List<ReadingProfilePatch> readings = new ArrayList<>();
-            for (ReadingProfilePatch reading : patch.readingPatches() == null ? List.<ReadingProfilePatch>of() : patch.readingPatches()) {
-                String category = bookCategoryService.normalize(reading.bookCategory());
-                if (!bookCategoryService.isAllowed(reading.bookCategory())) {
-                    category = fallbackCategory;
-                }
-                readings.add(new ReadingProfilePatch(
-                    category,
-                    reading.understandingLevel(),
-                    reading.learningStage(),
-                    reading.strengths(),
-                    reading.weaknesses(),
-                    reading.preferredExplanation(),
-                    reading.backgroundNeeds(),
-                    reading.typicalQuestions(),
-                    reading.summary(),
-                    reading.confidenceDelta()));
-            }
-            List<NewEvidencePatch> evidences = new ArrayList<>();
-            for (NewEvidencePatch evidence : patch.newEvidence() == null ? List.<NewEvidencePatch>of() : patch.newEvidence()) {
-                String domain = "style".equals(evidence.evidenceDomain()) ? "style" : "reading_understanding";
-                String category = "reading_understanding".equals(domain)
-                    ? bookCategoryService.normalize(evidence.bookCategory())
-                    : null;
-                evidences.add(new NewEvidencePatch(domain, evidence.evidenceType(), category,
-                    evidence.content(), evidence.importance()));
-            }
-            return new ProfileUpdatePatch(patch.stylePatch(), readings, evidences, patch.summary());
+            return parseAndValidatePatch(rawPatch, fallbackCategory);
         } catch (Exception exception) {
-            log.warn("画像 patch 解析失败: {}", exception.getMessage());
-            throw new IllegalArgumentException("模型画像 patch 解析失败", exception);
+            String firstError = exception.getMessage();
+            log.warn("画像 patch 首次解析失败，准备重试修复: {}", firstError);
+            String retryRaw = modelClient.chat(buildRetryPrompt(originalPrompt, rawPatch, firstError));
+            try {
+                return parseAndValidatePatch(retryRaw, fallbackCategory);
+            } catch (Exception retryException) {
+                log.warn("画像 patch 重试解析仍失败: {}", retryException.getMessage());
+                return null;
+            }
         }
+    }
+
+    private ParsedProfilePatch parseAndValidatePatch(String rawPatch, String fallbackCategory) throws Exception {
+        String normalized = extractJson(rawPatch);
+        JsonNode root = objectMapper.readTree(normalized);
+        validateRoot(root);
+        ProfileUpdatePatch patch = objectMapper.treeToValue(root, ProfileUpdatePatch.class);
+
+        List<ReadingProfilePatch> readings = new ArrayList<>();
+        for (ReadingProfilePatch reading : patch.readingPatches() == null ? List.<ReadingProfilePatch>of() : patch.readingPatches()) {
+            if (!bookCategoryService.isAllowed(reading.bookCategory())) {
+                throw new IllegalArgumentException("readingPatches.bookCategory 必须属于固定枚举: " + reading.bookCategory());
+            }
+            readings.add(new ReadingProfilePatch(
+                bookCategoryService.normalize(reading.bookCategory()),
+                reading.understandingLevel(),
+                reading.learningStage(),
+                reading.strengths(),
+                reading.weaknesses(),
+                reading.preferredExplanation(),
+                reading.backgroundNeeds(),
+                reading.typicalQuestions(),
+                reading.summary(),
+                reading.confidenceDelta()));
+        }
+        List<NewEvidencePatch> evidences = new ArrayList<>();
+        for (NewEvidencePatch evidence : patch.newEvidence() == null ? List.<NewEvidencePatch>of() : patch.newEvidence()) {
+            String domain = "style".equals(evidence.evidenceDomain()) ? "style" : "reading_understanding";
+            String category = "reading_understanding".equals(domain)
+                ? bookCategoryService.normalize(evidence.bookCategory())
+                : null;
+            evidences.add(new NewEvidencePatch(domain, evidence.evidenceType(), category,
+                evidence.content(), evidence.importance(), evidence.relatedBookId(),
+                evidence.relatedBookTitle(), evidence.relatedChapterIndex()));
+        }
+        return new ParsedProfilePatch(
+            new ProfileUpdatePatch(patch.stylePatch(), readings, evidences, patch.summary()),
+            normalized);
     }
 
     private String buildPatchPrompt(List<MemoryItem> memories,
@@ -255,20 +293,61 @@ public class ProfileUpdateService {
                                     String resolvedCategory,
                                     ProfileUpdateRequest request) {
         return """
-            你是用户画像更新器，不是普通问答助手。请根据最近重要情景记忆和旧画像生成局部 JSON patch。
+            你是用户画像更新器，不是普通问答助手。请根据最近重要情景记忆和旧画像生成局部更新对象。
+
+            强制输出规则：
+            - 只输出纯 JSON，不要 Markdown code fence，不要解释文字。
+            - 禁止输出 RFC 6902 JSON Patch 格式，不能出现 op/path/value。
+            - 顶层只允许 stylePatch、readingPatches、newEvidence、summary 四个字段。
 
             只允许更新两类画像：style、reading_understanding。
             bookCategory 只能使用：社会学、技术、历史、文学、哲学、心理学、英语、职业成长、经济学、其他。
             当前相关 bookCategory 默认值：%s
-            不要生成复杂 domain，不要记录 currentChapterIndex、readingProgress、readingStatus，不要因为一次记忆大幅改变画像。
+            不要生成复杂 domain，不要记录 bookId、chapterIndex、question、answer、currentChapterIndex、readingProgress、readingStatus，不要因为一次记忆大幅改变画像。
 
-            输出 JSON，字段必须是：
+            输出 JSON schema 必须是：
             {
-              "stylePatch": {...或null},
-              "readingPatches": [],
-              "newEvidence": [],
+              "stylePatch": {
+                "explanationStyle": "通俗、具体",
+                "preferredDepth": "medium_to_detailed",
+                "prefersExamples": true,
+                "prefersStorytelling": false,
+                "prefersStepByStep": true,
+                "avoidance": ["教科书式回答"],
+                "summary": "用户偏好通俗、具体、带例子的解释。",
+                "confidenceDelta": 0.1
+              },
+              "readingPatches": [
+                {
+                  "bookCategory": "%s",
+                  "understandingLevel": "learning",
+                  "learningStage": "case_mapping",
+                  "strengths": ["能识别回答是否空泛"],
+                  "weaknesses": ["抽象概念需要具体案例支撑"],
+                  "preferredExplanation": ["直接进入故事", "最后回扣原文观点"],
+                  "backgroundNeeds": ["历史背景"],
+                  "typicalQuestions": ["能否举一个实际例子"],
+                  "summary": "用户阅读这类书籍时偏好完整案例和背景解释。",
+                  "confidenceDelta": 0.1
+                }
+              ],
+              "newEvidence": [
+                {
+                  "evidenceDomain": "reading_understanding",
+                  "evidenceType": "case_need",
+                  "bookCategory": "%s",
+                  "content": "用户阅读这类内容时需要完整案例和背景解释。",
+                  "importance": 0.82,
+                  "relatedBookId": %s,
+                  "relatedBookTitle": "",
+                  "relatedChapterIndex": %s
+                }
+              ],
               "summary": "..."
             }
+
+            readingPatches 中禁止出现：op、path、value、bookId、chapterIndex、question、answer、readingProgress、currentChapterIndex。
+            newEvidence 必须是对象数组，不允许字符串数组。
 
             旧风格画像：
             %s
@@ -283,6 +362,10 @@ public class ProfileUpdateService {
             %s
             """.formatted(
             resolvedCategory,
+            resolvedCategory,
+            resolvedCategory,
+            request == null ? null : request.bookId(),
+            request == null ? null : request.chapterIndex(),
             oldStyleSnapshot,
             oldReadingSnapshot,
             request == null ? null : request.bookId(),
@@ -293,18 +376,128 @@ public class ProfileUpdateService {
                 .toList());
     }
 
-    private boolean containsForbiddenField(String raw) {
-        String text = raw == null ? "" : raw;
-        return text.contains("currentChapterIndex")
-            || text.contains("readingProgress")
-            || text.contains("readingStatus");
+    private String buildRetryPrompt(String originalPrompt, String invalidOutput, String parseError) {
+        return """
+            上一次用户画像更新模型输出不合法，不能写入数据库。请只输出修正后的纯 JSON，不要 Markdown，不要解释。
+
+            解析/校验错误：
+            %s
+
+            非法输出：
+            %s
+
+            必须遵守：
+            - 顶层只允许 stylePatch、readingPatches、newEvidence、summary。
+            - 禁止 JSON Patch 格式，不能出现 op/path/value。
+            - readingPatches 只能是画像字段对象数组，禁止 bookId/chapterIndex/question/answer/readingProgress/currentChapterIndex。
+            - newEvidence 必须是对象数组，不能是字符串数组。
+            - bookCategory 只能是：社会学、技术、历史、文学、哲学、心理学、英语、职业成长、经济学、其他。
+
+            目标 schema：
+            {
+              "stylePatch": null,
+              "readingPatches": [
+                {
+                  "bookCategory": "社会学",
+                  "understandingLevel": "learning",
+                  "learningStage": "case_mapping",
+                  "strengths": ["..."],
+                  "weaknesses": ["..."],
+                  "preferredExplanation": ["..."],
+                  "backgroundNeeds": ["..."],
+                  "typicalQuestions": ["..."],
+                  "summary": "...",
+                  "confidenceDelta": 0.1
+                }
+              ],
+              "newEvidence": [
+                {
+                  "evidenceDomain": "reading_understanding",
+                  "evidenceType": "case_need",
+                  "bookCategory": "社会学",
+                  "content": "用户阅读社会学类内容时需要完整案例和背景解释。",
+                  "importance": 0.82,
+                  "relatedBookId": 44,
+                  "relatedBookTitle": "",
+                  "relatedChapterIndex": 1
+                }
+              ],
+              "summary": "..."
+            }
+
+            原始任务提示：
+            %s
+            """.formatted(parseError, invalidOutput, originalPrompt);
     }
 
-    private String stripCodeFence(String value) {
+    private String extractJson(String value) {
         if (value == null) {
             return "{}";
         }
-        return value.replace("```json", "").replace("```", "").trim();
+        String trimmed = value.trim();
+        int fenceStart = trimmed.indexOf("```");
+        if (fenceStart >= 0) {
+            int contentStart = trimmed.indexOf('\n', fenceStart);
+            int fenceEnd = trimmed.indexOf("```", contentStart < 0 ? fenceStart + 3 : contentStart + 1);
+            if (contentStart >= 0 && fenceEnd > contentStart) {
+                return trimmed.substring(contentStart + 1, fenceEnd).trim();
+            }
+        }
+        int firstBrace = trimmed.indexOf('{');
+        int lastBrace = trimmed.lastIndexOf('}');
+        if (firstBrace >= 0 && lastBrace > firstBrace) {
+            return trimmed.substring(firstBrace, lastBrace + 1).trim();
+        }
+        return trimmed;
+    }
+
+    private void validateRoot(JsonNode root) {
+        if (!(root instanceof ObjectNode objectNode)) {
+            throw new IllegalArgumentException("画像 patch 顶层必须是 JSON object");
+        }
+        List<String> allowedTopLevel = List.of("stylePatch", "readingPatches", "newEvidence", "summary");
+        objectNode.fieldNames().forEachRemaining(field -> {
+            if (!allowedTopLevel.contains(field)) {
+                throw new IllegalArgumentException("画像 patch 顶层字段不允许: " + field);
+            }
+        });
+        JsonNode readingPatches = root.get("readingPatches");
+        if (readingPatches != null && !readingPatches.isNull()) {
+            if (!(readingPatches instanceof ArrayNode arrayNode)) {
+                throw new IllegalArgumentException("readingPatches 必须是对象数组");
+            }
+            for (JsonNode item : arrayNode) {
+                if (!(item instanceof ObjectNode readingObject)) {
+                    throw new IllegalArgumentException("readingPatches 必须是对象数组");
+                }
+                rejectForbiddenReadingFields(readingObject);
+                JsonNode category = readingObject.get("bookCategory");
+                if (category == null || !category.isTextual() || !bookCategoryService.isAllowed(category.asText())) {
+                    throw new IllegalArgumentException("readingPatches.bookCategory 必须属于固定枚举");
+                }
+            }
+        }
+        JsonNode newEvidence = root.get("newEvidence");
+        if (newEvidence != null && !newEvidence.isNull()) {
+            if (!(newEvidence instanceof ArrayNode arrayNode)) {
+                throw new IllegalArgumentException("newEvidence 必须是对象数组");
+            }
+            for (JsonNode item : arrayNode) {
+                if (!(item instanceof ObjectNode)) {
+                    throw new IllegalArgumentException("newEvidence 必须是对象数组，不允许字符串数组");
+                }
+            }
+        }
+    }
+
+    private void rejectForbiddenReadingFields(ObjectNode readingPatch) {
+        List<String> forbidden = List.of("op", "path", "value", "bookId", "chapterIndex",
+            "question", "answer", "readingProgress", "currentChapterIndex");
+        for (String field : forbidden) {
+            if (readingPatch.has(field)) {
+                throw new IllegalArgumentException("readingPatches 包含禁止字段: " + field);
+            }
+        }
     }
 
     private String normalizeEvidenceType(String value) {
@@ -312,5 +505,8 @@ public class ProfileUpdateService {
             return "explanation_preference";
         }
         return value.trim();
+    }
+
+    private record ParsedProfilePatch(ProfileUpdatePatch patch, String rawJson) {
     }
 }
