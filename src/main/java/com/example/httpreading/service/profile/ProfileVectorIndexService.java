@@ -8,6 +8,7 @@ import java.util.Map;
 import com.example.httpreading.domain.profile.ProfileGrowthEvidence;
 import com.example.httpreading.domain.profile.ProfileVectorIndexMapping;
 import com.example.httpreading.domain.profile.ReadingUnderstandingProfile;
+import com.example.httpreading.domain.profile.UserKnowledgeState;
 import com.example.httpreading.domain.profile.UserStyleProfile;
 import com.example.httpreading.dto.profile.ProfileDtos.ProfileSearchResult;
 import com.example.httpreading.dto.profile.ProfileDtos.ProfileVectorHit;
@@ -15,6 +16,7 @@ import com.example.httpreading.memory.storage.QdrantStore;
 import com.example.httpreading.repository.ProfileGrowthEvidenceRepository;
 import com.example.httpreading.repository.ProfileVectorIndexMappingRepository;
 import com.example.httpreading.repository.ReadingUnderstandingProfileRepository;
+import com.example.httpreading.repository.UserKnowledgeStateRepository;
 import com.example.httpreading.repository.UserStyleProfileRepository;
 import com.example.httpreading.service.EmbeddingService;
 import org.slf4j.Logger;
@@ -30,6 +32,7 @@ public class ProfileVectorIndexService {
     private final ProfileVectorIndexMappingRepository mappingRepository;
     private final UserStyleProfileRepository styleRepository;
     private final ReadingUnderstandingProfileRepository readingRepository;
+    private final UserKnowledgeStateRepository knowledgeStateRepository;
     private final ProfileGrowthEvidenceRepository evidenceRepository;
     private final ProfileMapper mapper;
 
@@ -38,6 +41,7 @@ public class ProfileVectorIndexService {
                                      ProfileVectorIndexMappingRepository mappingRepository,
                                      UserStyleProfileRepository styleRepository,
                                      ReadingUnderstandingProfileRepository readingRepository,
+                                     UserKnowledgeStateRepository knowledgeStateRepository,
                                      ProfileGrowthEvidenceRepository evidenceRepository,
                                      ProfileMapper mapper) {
         this.qdrantStore = qdrantStore;
@@ -45,6 +49,7 @@ public class ProfileVectorIndexService {
         this.mappingRepository = mappingRepository;
         this.styleRepository = styleRepository;
         this.readingRepository = readingRepository;
+        this.knowledgeStateRepository = knowledgeStateRepository;
         this.evidenceRepository = evidenceRepository;
         this.mapper = mapper;
     }
@@ -76,6 +81,28 @@ public class ProfileVectorIndexService {
         metadata.put("status", "active");
         metadata.put("summary", text == null ? "" : text);
         return upsert(profile.getUserId(), "reading_understanding_profile", profile.getId(), vectorId, "reading_state", text, metadata);
+    }
+
+    public boolean upsertKnowledgeStateVector(UserKnowledgeState state) {
+        String text = String.join("\n",
+            state.getTopic() == null ? "" : state.getTopic(),
+            state.getSummary() == null ? "" : state.getSummary(),
+            state.getMasteredEvidence() == null ? "" : state.getMasteredEvidence(),
+            state.getWeaknessEvidence() == null ? "" : state.getWeaknessEvidence());
+        String vectorId = "knowledge_state:" + state.getUserId() + ":" + state.getDomain() + ":" + state.getTopic();
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("userId", state.getUserId());
+        metadata.put("sourceType", "user_knowledge_state");
+        metadata.put("sourceId", state.getId());
+        metadata.put("vectorId", vectorId);
+        metadata.put("categoryCode", "knowledge_state");
+        metadata.put("bookCategory", state.getDomain());
+        metadata.put("topic", state.getTopic());
+        metadata.put("knowledgeType", state.getKnowledgeType());
+        metadata.put("level", state.getLevel());
+        metadata.put("status", "active");
+        metadata.put("summary", state.getSummary() == null ? "" : state.getSummary());
+        return upsert(state.getUserId(), "user_knowledge_state", state.getId(), vectorId, "knowledge_state", text, metadata);
     }
 
     public boolean upsertEvidenceVector(ProfileGrowthEvidence evidence) {
@@ -116,15 +143,21 @@ public class ProfileVectorIndexService {
         if (bookCategory != null && !bookCategory.isBlank()) {
             where.put("bookCategory", bookCategory);
         }
-        List<Map<String, Object>> hits = qdrantStore.searchSimilar(
-            floats.stream().map(Float::doubleValue).toList(),
-            topK <= 0 ? 5 : topK,
-            minScore <= 0d ? 0.72d : minScore,
-            where);
+        List<Double> vector = floats.stream().map(Float::doubleValue).toList();
+        int safeTopK = topK <= 0 ? 5 : topK;
+        double safeMinScore = minScore <= 0d ? 0.72d : minScore;
+        List<Map<String, Object>> hits = new ArrayList<>();
+        if (categoryCode == null || categoryCode.isBlank()) {
+            Map<String, Object> knowledgeWhere = new LinkedHashMap<>(where);
+            knowledgeWhere.put("categoryCode", "knowledge_state");
+            hits.addAll(qdrantStore.searchSimilar(vector, safeTopK, safeMinScore, knowledgeWhere));
+        }
+        hits.addAll(qdrantStore.searchSimilar(vector, safeTopK, safeMinScore, where));
         List<ProfileVectorHit> items = new ArrayList<>();
+        List<String> seen = new ArrayList<>();
         for (Map<String, Object> hit : hits) {
             double score = hit.get("score") instanceof Number number ? number.doubleValue() : 0d;
-            if (score < (minScore <= 0d ? 0.72d : minScore)) {
+            if (score < safeMinScore) {
                 continue;
             }
             @SuppressWarnings("unchecked")
@@ -132,8 +165,13 @@ public class ProfileVectorIndexService {
                 ? new LinkedHashMap<>((Map<String, Object>) raw)
                 : new LinkedHashMap<>();
             ProfileVectorHit vectorHit = toHit(metadata, score);
-            if (vectorHit != null) {
+            String key = vectorHit == null ? "" : vectorHit.sourceType() + ":" + vectorHit.sourceId();
+            if (vectorHit != null && !seen.contains(key)) {
                 items.add(vectorHit);
+                seen.add(key);
+                if (items.size() >= safeTopK) {
+                    break;
+                }
             }
         }
         if (items.isEmpty()) {
@@ -186,6 +224,8 @@ public class ProfileVectorIndexService {
             styleRepository.findById(sourceId).ifPresent(profile -> detail.put("profile", mapper.toDto(profile)));
         } else if ("reading_understanding_profile".equals(sourceType)) {
             readingRepository.findById(sourceId).ifPresent(profile -> detail.put("profile", mapper.toDto(profile)));
+        } else if ("user_knowledge_state".equals(sourceType)) {
+            knowledgeStateRepository.findById(sourceId).ifPresent(state -> detail.put("profile", mapper.toDto(state)));
         } else if ("profile_growth_evidence".equals(sourceType)) {
             evidenceRepository.findById(sourceId).ifPresent(evidence -> {
                 detail.put("evidenceType", evidence.getEvidenceType());

@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -17,15 +16,22 @@ import java.util.Optional;
 
 import com.example.httpreading.domain.profile.ProfileGrowthEvidence;
 import com.example.httpreading.domain.profile.ReadingUnderstandingProfile;
+import com.example.httpreading.domain.profile.UserKnowledgeState;
 import com.example.httpreading.domain.profile.UserStyleProfile;
+import com.example.httpreading.dto.profile.ProfileDtos.KnowledgeStatePatch;
+import com.example.httpreading.dto.profile.ProfileDtos.NewEvidencePatch;
+import com.example.httpreading.dto.profile.ProfileDtos.ProfileUpdatePatch;
 import com.example.httpreading.dto.profile.ProfileDtos.ProfileUpdateRequest;
+import com.example.httpreading.dto.profile.ProfileDtos.ReadingProfilePatch;
 import com.example.httpreading.repository.BooksRepository;
 import com.example.httpreading.repository.ProfileUpdateLogRepository;
 import com.example.httpreading.service.AgentMemoryService;
 import com.example.httpreading.service.ModelClient;
+import com.example.httpreading.service.profile.ProfilePatchExtractor.ExtractedProfilePatch;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.stubbing.Answer;
 
 class ProfileUpdateServiceTest {
@@ -33,11 +39,13 @@ class ProfileUpdateServiceTest {
     private AgentMemoryService agentMemoryService;
     private UserStyleProfileService styleProfileService;
     private ReadingUnderstandingProfileService readingProfileService;
+    private UserKnowledgeStateService knowledgeStateService;
     private ProfileGrowthEvidenceService evidenceService;
     private ProfileVectorIndexService vectorIndexService;
     private ProfileUpdateLogRepository updateLogRepository;
     private BooksRepository booksRepository;
     private ModelClient modelClient;
+    private ProfilePatchExtractor patchExtractor;
     private ProfileUpdateService service;
 
     @BeforeEach
@@ -50,11 +58,13 @@ class ProfileUpdateServiceTest {
         agentMemoryService = mock(AgentMemoryService.class);
         styleProfileService = mock(UserStyleProfileService.class);
         readingProfileService = mock(ReadingUnderstandingProfileService.class);
+        knowledgeStateService = mock(UserKnowledgeStateService.class);
         evidenceService = mock(ProfileGrowthEvidenceService.class);
         vectorIndexService = mock(ProfileVectorIndexService.class);
         updateLogRepository = mock(ProfileUpdateLogRepository.class);
         booksRepository = mock(BooksRepository.class);
         modelClient = mock(ModelClient.class);
+        patchExtractor = mock(ProfilePatchExtractor.class);
         BookCategoryService bookCategoryService = new BookCategoryService(booksRepository, modelClient);
 
         when(userResolver.resolve(any(), any())).thenReturn("u1");
@@ -66,8 +76,16 @@ class ProfileUpdateServiceTest {
         when(readingProfileService.listByUser("u1")).thenReturn(List.of());
         when(readingProfileService.updateReadingProfile(anyString(), anyString(), any(), any()))
             .thenReturn(readingProfile());
+        when(knowledgeStateService.listByUser("u1")).thenReturn(List.of());
+        when(knowledgeStateService.isAllowedKnowledgeType(anyString())).thenAnswer(invocation ->
+            List.of("concept", "person", "event", "theory", "method", "case", "other").contains(invocation.getArgument(0)));
+        when(knowledgeStateService.isAllowedLevel(anyString())).thenAnswer(invocation ->
+            List.of("unknown", "exposed", "learning", "basic_understood", "well_understood").contains(invocation.getArgument(0)));
+        when(knowledgeStateService.updateKnowledgeState(anyString(), any(), any()))
+            .thenReturn(knowledgeState());
         when(vectorIndexService.upsertStyleStateVector(any())).thenReturn(true);
         when(vectorIndexService.upsertReadingStateVector(any())).thenReturn(true);
+        when(vectorIndexService.upsertKnowledgeStateVector(any())).thenReturn(true);
         when(vectorIndexService.upsertEvidenceVector(any())).thenReturn(true);
         when(evidenceService.saveEvidence(any())).thenAnswer((Answer<ProfileGrowthEvidence>) invocation -> {
             ProfileGrowthEvidence evidence = invocation.getArgument(0);
@@ -80,80 +98,71 @@ class ProfileUpdateServiceTest {
             agentMemoryService,
             styleProfileService,
             readingProfileService,
+            knowledgeStateService,
             evidenceService,
             vectorIndexService,
             updateLogRepository,
             bookCategoryService,
-            booksRepository,
-            modelClient,
-            objectMapper,
+            patchExtractor,
             profileJson,
             profileMapper);
     }
 
     @Test
-    void stringEvidenceArrayFailsThenRetryCanSucceed() {
-        when(modelClient.chat(anyString())).thenReturn(invalidStringEvidence(), validPatch());
+    void evidenceDoesNotUseRequestBookAsDefaultSource() {
+        when(patchExtractor.extract(any(), any(), any(), any(), anyString(), anyString()))
+            .thenReturn(extracted(styleEvidenceWithoutSource()));
 
         var response = service.updateProfileManually(request());
 
         assertEquals("success", response.status());
-        verify(modelClient, org.mockito.Mockito.times(2)).chat(anyString());
-        verify(evidenceService).saveEvidence(any());
+        ArgumentCaptor<ProfileGrowthEvidence> evidence = ArgumentCaptor.forClass(ProfileGrowthEvidence.class);
+        verify(evidenceService).saveEvidence(evidence.capture());
+        assertEquals(null, evidence.getValue().getRelatedBookId());
+        assertEquals(null, evidence.getValue().getRelatedBookTitle());
+        assertEquals(null, evidence.getValue().getRelatedChapterIndex());
     }
 
     @Test
-    void jsonPatchReadingPatchIsRejected() {
-        when(modelClient.chat(anyString())).thenReturn(jsonPatchStyle(), jsonPatchStyle());
-
-        var response = service.updateProfileManually(request());
-
-        assertEquals("profile_patch_parse_failed", response.status());
-        verify(evidenceService, never()).saveEvidence(any());
-        verify(styleProfileService, never()).updateStyleProfile(anyString(), any());
-    }
-
-    @Test
-    void markdownCodeFenceJsonCanBeExtracted() {
-        when(modelClient.chat(anyString())).thenReturn("```json\n" + validPatch() + "\n```");
+    void evidenceUsesOnlyExplicitPatchSource() {
+        when(patchExtractor.extract(any(), any(), any(), any(), anyString(), anyString()))
+            .thenReturn(extracted(readingEvidenceWithSource()));
 
         var response = service.updateProfileManually(request());
 
         assertEquals("success", response.status());
-        verify(modelClient).chat(anyString());
+        ArgumentCaptor<ProfileGrowthEvidence> evidence = ArgumentCaptor.forClass(ProfileGrowthEvidence.class);
+        verify(evidenceService).saveEvidence(evidence.capture());
+        assertEquals(99L, evidence.getValue().getRelatedBookId());
+        assertEquals("明确来源书", evidence.getValue().getRelatedBookTitle());
+        assertEquals(3, evidence.getValue().getRelatedChapterIndex());
     }
 
     @Test
-    void retryLegalJsonUpdatesProfile() {
-        when(modelClient.chat(anyString())).thenReturn("{not json", validPatch());
+    void knowledgePatchDoesNotUseRequestBookAsDefaultSource() {
+        when(patchExtractor.extract(any(), any(), any(), any(), anyString(), anyString()))
+            .thenReturn(extracted(knowledgePatchWithoutSource()));
 
         var response = service.updateProfileManually(request());
 
         assertEquals("success", response.status());
-        verify(modelClient, org.mockito.Mockito.times(2)).chat(anyString());
-        verify(readingProfileService).updateReadingProfile(anyString(), anyString(), any(), anyLong());
+        ArgumentCaptor<KnowledgeStatePatch> patch = ArgumentCaptor.forClass(KnowledgeStatePatch.class);
+        verify(knowledgeStateService).updateKnowledgeState(anyString(), patch.capture(), any());
+        assertEquals(null, patch.getValue().relatedBookId());
+        assertEquals(null, patch.getValue().relatedBookTitle());
+        assertEquals(null, patch.getValue().relatedChapterIndex());
+        verify(vectorIndexService).upsertKnowledgeStateVector(any());
     }
 
     @Test
-    void retryStillIllegalReturnsParseFailedWithoutWriting() {
-        when(modelClient.chat(anyString())).thenReturn("{not json", invalidStringEvidence());
+    void extractorParseFailedDoesNotWrite() {
+        when(patchExtractor.extract(any(), any(), any(), any(), anyString(), anyString())).thenReturn(null);
 
         var response = service.updateProfileManually(request());
 
         assertEquals("profile_patch_parse_failed", response.status());
         verify(evidenceService, never()).saveEvidence(any());
         verify(updateLogRepository, never()).save(any());
-    }
-
-    @Test
-    void stylePreferenceReadingPatchIsSkippedAndOnlyStyleUpdates() {
-        when(modelClient.chat(anyString())).thenReturn(styleOnlyPatchWithMisplacedReadingPatch());
-
-        var response = service.updateProfileManually(request());
-
-        assertEquals("success", response.status());
-        verify(styleProfileService).updateStyleProfile(anyString(), any());
-        verify(readingProfileService, never()).updateReadingProfile(anyString(), anyString(), any(), any());
     }
 
     private ProfileUpdateRequest request() {
@@ -181,6 +190,19 @@ class ProfileUpdateServiceTest {
         return profile;
     }
 
+    private UserKnowledgeState knowledgeState() {
+        UserKnowledgeState state = new UserKnowledgeState();
+        state.setId(3L);
+        state.setUserId("u1");
+        state.setDomain("社会学");
+        state.setTopic("差序格局");
+        state.setKnowledgeType("concept");
+        state.setLevel("learning");
+        state.setConfidence(0.6d);
+        state.setUpdatedAt(LocalDateTime.now());
+        return state;
+    }
+
     private List<com.example.httpreading.memory.model.MemoryItem> memories() {
         return java.util.stream.IntStream.range(0, 6)
             .mapToObj(i -> new com.example.httpreading.memory.model.MemoryItem(
@@ -194,111 +216,40 @@ class ProfileUpdateServiceTest {
             .toList();
     }
 
-    private String validPatch() {
-        return """
-            {
-              "stylePatch": null,
-              "readingPatches": [
-                {
-                  "bookCategory": "社会学",
-                  "understandingLevel": "learning",
-                  "learningStage": "case_mapping",
-                  "strengths": ["能识别回答是否空泛"],
-                  "weaknesses": ["对社会学概念边界仍不稳定"],
-                  "preferredExplanation": [],
-                  "backgroundNeeds": [],
-                  "typicalQuestions": ["这个概念和案例如何对应"],
-                  "summary": "用户对社会学类内容处于概念理解到案例映射阶段。",
-                  "confidenceDelta": 0.1
-                }
-              ],
-              "newEvidence": [
-                {
-                  "evidenceDomain": "reading_understanding",
-                  "evidenceType": "concept_confusion",
-                  "bookCategory": "社会学",
-                  "content": "用户对社会学概念边界仍不稳定，正在练习把概念和案例对应起来。",
-                  "importance": 0.82,
-                  "relatedBookId": 44,
-                  "relatedBookTitle": "测试书",
-                  "relatedChapterIndex": 1
-                }
-              ],
-              "summary": "更新社会学阅读理解画像"
-            }
-            """;
+    private ExtractedProfilePatch extracted(ProfileUpdatePatch patch) {
+        return new ExtractedProfilePatch(patch, "{}");
     }
 
-    private String styleOnlyPatchWithMisplacedReadingPatch() {
-        return """
-            {
-              "stylePatch": {
-                "explanationStyle": "通俗、具体、案例化、补充背景",
-                "preferredDepth": "medium_to_detailed",
-                "prefersExamples": true,
-                "prefersStorytelling": true,
-                "prefersStepByStep": true,
-                "avoidance": ["教科书式回答", "空泛总结"],
-                "summary": "用户偏好完整案例、背景解释、直接进入故事，并希望最后回扣原文观点。",
-                "confidenceDelta": 0.1
-              },
-              "readingPatches": [
-                {
-                  "bookCategory": "社会学",
-                  "understandingLevel": "learning",
-                  "learningStage": "case_mapping",
-                  "strengths": ["能识别回答是否空泛"],
-                  "weaknesses": ["抽象概念需要具体案例支撑"],
-                  "preferredExplanation": ["直接进入故事", "最后回扣原文观点"],
-                  "backgroundNeeds": ["历史背景"],
-                  "typicalQuestions": ["能否举一个实际例子"],
-                  "summary": "用户阅读社会学类书籍时偏好完整案例和背景解释。",
-                  "confidenceDelta": 0.1
-                }
-              ],
-              "newEvidence": [
-                {
-                  "evidenceDomain": "reading_understanding",
-                  "evidenceType": "case_need",
-                  "bookCategory": "社会学",
-                  "content": "用户要求完整案例和背景解释。",
-                  "importance": 0.82
-                }
-              ],
-              "summary": "更新用户解释风格"
-            }
-            """;
+    private ProfileUpdatePatch styleEvidenceWithoutSource() {
+        return new ProfileUpdatePatch(
+            null,
+            List.of(),
+            List.of(),
+            List.of(new NewEvidencePatch("style", "explanation_preference", null,
+                "用户要求完整案例。", 0.8, null, null, null)),
+            "更新风格画像");
     }
 
-    private String invalidStringEvidence() {
-        return """
-            {
-              "stylePatch": null,
-              "readingPatches": [],
-              "newEvidence": ["用户喜欢完整案例"],
-              "summary": "bad"
-            }
-            """;
+    private ProfileUpdatePatch readingEvidenceWithSource() {
+        return new ProfileUpdatePatch(
+            null,
+            List.of(new ReadingProfilePatch("社会学", "learning", "case_mapping",
+                List.of(), List.of("概念边界不稳定"), List.of(), List.of(), List.of(),
+                "类别级概览", 0.1)),
+            List.of(),
+            List.of(new NewEvidencePatch("reading_understanding", "concept_confusion", "社会学",
+                "用户对概念边界仍不稳定。", 0.8, 99L, "明确来源书", 3)),
+            "更新阅读理解画像");
     }
 
-    private String jsonPatchStyle() {
-        return """
-            {
-              "stylePatch": null,
-              "readingPatches": [
-                {
-                  "op": "replace",
-                  "path": "/readingProgress",
-                  "value": "80%",
-                  "bookId": 44,
-                  "chapterIndex": 1,
-                  "question": "q",
-                  "answer": "a"
-                }
-              ],
-              "newEvidence": [],
-              "summary": "bad"
-            }
-            """;
+    private ProfileUpdatePatch knowledgePatchWithoutSource() {
+        return new ProfileUpdatePatch(
+            null,
+            List.of(),
+            List.of(new KnowledgeStatePatch("社会学", "差序格局", "concept", "learning",
+                0.1, "", "用户仍需要通过具体案例理解差序格局的边界。",
+                "用户正在理解差序格局。", null, null, null)),
+            List.of(),
+            "更新知识点状态");
     }
 }

@@ -131,6 +131,34 @@ class ExternalMcpClientServiceTest {
     }
 
     @Test
+    void allowedToolDescriptorsExposeSelfLocalProfileDescriptions() {
+        ExternalMcpClientProperties.Server configured = server("self-local", true);
+        configured.setAllowedTools(List.of("profile_search_relevant"));
+
+        FakeSession session = new FakeSession(new CallToolResult(List.of(new TextContent("ok")), false));
+        session.tools = new ListToolsResult(List.of(Tool.builder()
+            .name("profile_search_relevant")
+            .description("Search user profile snippets for style, reading understanding state, knowledge mastery state, next-reading recommendation, and previous knowledge relation.")
+            .inputSchema(new JsonSchema("object", Map.of(
+                "standaloneQuestion", Map.of("type", "string"),
+                "categoryCode", Map.of("type", "string"),
+                "bookCategory", Map.of("type", "string"),
+                "topK", Map.of("type", "integer"),
+                "minScore", Map.of("type", "number")), List.of("userId"), false, null, null))
+            .build()), null);
+        ExternalMcpClientService service = service(properties(configured), server -> session);
+
+        List<Map<String, Object>> tools = service.allowedToolDescriptors("self-local");
+
+        assertEquals(1, tools.size());
+        assertEquals("self-local", tools.get(0).get("serverName"));
+        assertEquals("profile_search_relevant", tools.get(0).get("toolName"));
+        assertTrue(String.valueOf(tools.get(0).get("description")).contains("knowledge mastery state"));
+        assertTrue(String.valueOf(tools.get(0).get("inputSchema")).contains("standaloneQuestion"));
+        assertTrue(String.valueOf(tools.get(0).get("inputSchema")).contains("minScore"));
+    }
+
+    @Test
     void isToolAllowedRechecksEnabledServerAndConfiguredWhitelist() {
         ExternalMcpClientProperties.Server configured = server("s1", true);
         configured.setAllowedTools(List.of("search"));

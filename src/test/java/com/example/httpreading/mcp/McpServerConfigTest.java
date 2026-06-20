@@ -5,17 +5,20 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
+import java.util.Map;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.server.transport.HttpServletStreamableServerTransportProvider;
+import io.modelcontextprotocol.spec.McpSchema.Tool;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.web.servlet.ServletRegistrationBean;
 
 class McpServerConfigTest {
 
     @Test
-    void createsStreamableHttpServerWithSevenTools() {
+    void createsStreamableHttpServerWithProfileTools() {
         McpServerConfig config = new McpServerConfig();
         McpJsonMapper jsonMapper = config.mcpJsonMapper(new ObjectMapper());
         HttpServletStreamableServerTransportProvider transportProvider =
@@ -26,7 +29,19 @@ class McpServerConfigTest {
         assertNotNull(transportProvider);
         assertEquals("mcpServlet", registration.getServletName());
         assertTrue(registration.getUrlMappings().contains("/mcp"));
-        assertEquals(7, server.listTools().size());
+        assertEquals(10, server.listTools().size());
+        Map<String, Tool> tools = server.listTools().stream()
+            .collect(java.util.stream.Collectors.toMap(Tool::name, tool -> tool));
+        assertTrue(tools.containsKey("profile_list_categories"));
+        assertTrue(tools.containsKey("profile_get_category_detail"));
+        assertTrue(tools.containsKey("profile_search_relevant"));
+        assertTrue(tools.get("profile_search_relevant").description().contains("knowledge mastery state"));
+        assertTrue(tools.get("profile_search_relevant").description().contains("next-reading recommendation"));
+        assertTrue(tools.get("profile_search_relevant").inputSchema().properties().containsKey("standaloneQuestion"));
+        assertTrue(tools.get("profile_search_relevant").inputSchema().properties().containsKey("categoryCode"));
+        assertTrue(tools.get("profile_search_relevant").inputSchema().properties().containsKey("bookCategory"));
+        assertTrue(tools.get("profile_search_relevant").inputSchema().properties().containsKey("topK"));
+        assertTrue(tools.get("profile_search_relevant").inputSchema().properties().containsKey("minScore"));
         assertEquals("http-reading-mcp", server.getServerInfo().name());
     }
 }

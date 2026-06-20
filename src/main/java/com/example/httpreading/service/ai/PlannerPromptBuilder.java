@@ -65,12 +65,12 @@ public class PlannerPromptBuilder {
                - allowedTools=[]
                - toolPlan=[]
                - maxSteps=0
-            5. self-local 只用于当前页面、划词、最近对话、书籍 RAG、用户记忆等内部阅读能力；memoryEnabled=false 时不要因记忆需求选择它，ragEnabled=false 时不要因书籍检索需求选择它。
+            5. self-local 用于本项目内部阅读能力，包括当前页面、划词、最近对话、书籍 RAG、用户记忆、用户画像、知识状态、个性化解释、下一步阅读推荐和关联旧知识；memoryEnabled=false 时不要因记忆需求选择它，ragEnabled=false 时不要因书籍检索需求选择它。
             6. 用户需要 GitHub、网页、外部搜索、实时信息、最新信息、代码仓库时，必须选择匹配的外部 MCP server；如果没有匹配 server，不要用 self-local 凑数。
             7. 外部能力缺少匹配 server 时，answerMode=EXTERNAL_SEARCH_REQUIRED，evidenceStrictness=STRICT，并在 answerGuidance 中要求说明当前没有实际执行外部搜索。
             8. standaloneQuestion 要尽量把“这里/这个/它/这句话”等指代改写成独立问题。
             9. answerGuidance 要说明最终回答应如何处理证据、补充解释、案例、开头风格和重复内容。
-            10. 当用户问“按我能理解的方式讲 / 结合我的情况 / 我的阅读特点 / 你根据什么了解我 / 我总是理解不了这类内容”时，可以选择 mcp.server:self-local，让后续工具查询 profile 工具。
+            10. 是否选择 self-local 应根据“可调用 MCP server 白名单”中的 server 描述和 allowedTools 判断；不要在一级 Planner 中输出 server 内部具体工具名。
             
             taskType 只能是：
             SMALL_TALK, GENERAL_QA, READING_QA, MEMORY_QA, NOTE_QA, READING_PLAN, TOOL_ACTION
@@ -132,13 +132,6 @@ public class PlannerPromptBuilder {
             - answerRequirement.mustDistinguishTextEvidenceAndSupplement=true
             4. 不要因为 RAG 可能为空就默认 TEXT_ONLY + STRICT。
 
-            用户画像工具规则：
-            1. profile.list_categories：用户询问“你知道我的画像有哪些吗 / 我有哪些阅读特点 / 你根据什么了解我”时使用。
-            2. profile.get_category_detail：问题明确需要用户风格画像或某个 bookCategory 的阅读理解画像时使用。
-            3. profile.search_relevant：用户要求“按我能理解的方式讲 / 结合我的情况 / 这个问题怎么给我解释更合适”时使用。
-            4. profile.search_relevant 必须传 standaloneQuestion，不要直接用“这个呢 / 继续 / 再讲讲”等短追问检索。
-            5. profile 结果只用于调整解释方式、深度、例子类型和背景补充方式，不能当作原文证据或事实来源。
-            
             answerRequirement 设置规则：
             1. 如果用户要求“举个具体例子/实际例子/案例”，requiresConcreteExample=true。
             2. 如果用户要求“完整说出来/详细讲/过程是什么”，requiresDetailedProcess=true。

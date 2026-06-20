@@ -69,6 +69,33 @@ public class McpServerConfig {
                         property("answer", "string", "Assistant answer.")),
                     List.of("question", "answer")),
                 (exchange, request) -> result(tools.memoryRememberTurn(request.arguments())))
+            .toolCall(tool("profile_list_categories",
+                    "List user profile categories and summaries, including style, reading understanding, and knowledge state categories.",
+                    properties(
+                        property("userId", "string", "User id."),
+                        property("includeEmpty", "boolean", "Whether to include empty profile categories. Defaults to false.")),
+                    List.of("userId")),
+                (exchange, request) -> result(tools.profileListCategories(request.arguments())))
+            .toolCall(tool("profile_get_category_detail",
+                    "Get detailed user profile content for style guidance, reading understanding, or knowledge state. Use it when a specific profile category or book category is needed.",
+                    properties(
+                        property("userId", "string", "User id."),
+                        property("categoryCode", "string", "Profile category code, such as style, reading_understanding, or knowledge_state."),
+                        property("bookCategory", "string", "Optional fixed book category filter, such as 社会学、技术、历史、文学、哲学、心理学、英语、职业成长、经济学、其他.")),
+                    List.of("userId", "categoryCode")),
+                (exchange, request) -> result(tools.profileGetCategoryDetail(request.arguments())))
+            .toolCall(tool("profile_search_relevant",
+                    "Search semantically relevant user profile snippets by standalone question. Covers user style, reading understanding state, and knowledge mastery state; useful for personalized explanation, next-reading recommendation, and connecting the question to the user's previous knowledge.",
+                    properties(
+                        property("userId", "string", "User id."),
+                        property("query", "string", "Original user query. Use standaloneQuestion when available."),
+                        property("standaloneQuestion", "string", "Standalone rewritten question for profile retrieval; required for short follow-ups like 这个呢 or 继续."),
+                        property("topK", "integer", "Maximum profile hit count. Defaults to 5."),
+                        property("minScore", "number", "Minimum semantic score. Defaults to 0.72."),
+                        property("categoryCode", "string", "Optional category filter, such as style, reading_understanding, or knowledge_state."),
+                        property("bookCategory", "string", "Optional fixed book category filter.")),
+                    List.of("userId")),
+                (exchange, request) -> result(tools.profileSearchRelevant(request.arguments())))
             .toolCall(tool("rag_retrieve",
                     "Retrieve relevant book chunks from the local reading RAG index.",
                     properties(

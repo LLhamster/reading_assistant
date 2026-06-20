@@ -41,7 +41,7 @@ mcp:
   client:
     servers:
       - name: self-local
-        description: "用于本项目内部阅读系统能力，例如 memory、RAG、context；不用于通用百科或外部网站信息。"
+        description: "本项目内部阅读系统 MCP server，提供阅读上下文能力(context.get_current_page/context.get_recent_dialogue)、书籍 RAG 能力(rag.search/rag.answer)、用户记忆能力(memory.search)、用户画像能力(profile.list_categories/profile.get_category_detail/profile.search_relevant)。用户画像可用于个性化解释、推荐下一步阅读、关联用户以前学过的知识；不用于通用百科或外部网站信息。"
         url: http://localhost:8080/mcp
         enabled: true
         timeoutSeconds: 10
@@ -52,6 +52,7 @@ mcp:
           - profile_get_category_detail
           - profile_search_relevant
           - rag_retrieve
+          - rag_answer
           - context_get_recent_dialogue
           - context_get_current_page
           - context_build

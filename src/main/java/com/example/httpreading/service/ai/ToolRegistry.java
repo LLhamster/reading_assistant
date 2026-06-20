@@ -45,7 +45,7 @@ public class ToolRegistry {
             true));
         register(registry, new AvailableTool(
             "profile.list_categories",
-            "查询当前用户已有画像类别和摘要，只读。",
+            "查询当前用户已有画像类别和摘要，包括用户风格、阅读理解状态、知识点掌握状态，只读。",
             Map.of("userId", "string", "includeEmpty", "boolean"),
             true,
             false,
@@ -53,7 +53,7 @@ public class ToolRegistry {
             true));
         register(registry, new AvailableTool(
             "profile.get_category_detail",
-            "查询用户个人风格或某类书籍阅读理解画像详情，只读。",
+            "查询用户个人风格、阅读理解画像或知识点掌握状态详情，只读。",
             Map.of("userId", "string", "categoryCode", "string", "bookCategory", "string"),
             true,
             false,
@@ -61,7 +61,7 @@ public class ToolRegistry {
             true));
         register(registry, new AvailableTool(
             "profile.search_relevant",
-            "按独立问题检索相关用户画像片段，用于调整回答风格和解释方式，只读。",
+            "按独立问题检索相关用户画像片段，覆盖用户风格、阅读理解状态、知识点掌握状态，用于个性化解释、推荐下一步阅读、关联用户以前学过的知识，只读。",
             Map.of("userId", "string", "query", "string", "standaloneQuestion", "string", "topK", "number",
                 "minScore", "number", "categoryCode", "string", "bookCategory", "string"),
             true,

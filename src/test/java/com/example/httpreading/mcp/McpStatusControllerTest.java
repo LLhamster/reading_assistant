@@ -31,9 +31,12 @@ class McpStatusControllerTest {
         assertEquals("/mcp", response.getData().get("endpoint"));
         @SuppressWarnings("unchecked")
         List<String> tools = (List<String>) response.getData().get("tools");
-        assertEquals(7, tools.size());
+        assertEquals(10, tools.size());
         assertTrue(tools.contains("context_build"));
         assertTrue(tools.contains("context_get_recent_dialogue"));
         assertTrue(tools.contains("context_get_current_page"));
+        assertTrue(tools.contains("profile_list_categories"));
+        assertTrue(tools.contains("profile_get_category_detail"));
+        assertTrue(tools.contains("profile_search_relevant"));
     }
 }

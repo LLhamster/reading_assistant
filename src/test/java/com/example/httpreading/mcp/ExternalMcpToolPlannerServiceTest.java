@@ -199,6 +199,31 @@ class ExternalMcpToolPlannerServiceTest {
     }
 
     @Test
+    void shouldIncludeSelfLocalProfileToolDescriptionsInPrompt() {
+        when(modelClient.chat(anyString())).thenReturn(
+            "{\"status\":\"complete\",\"assessment\":\"done\",\"reasoningSummary\":\"done\",\"call\":null}");
+
+        plannerService.decide(
+            request("这可以和我以前学过的什么联系起来？"),
+            "Planner selected self-local because user profile and knowledge state may help.",
+            selfLocalProfileTools(),
+            List.of(),
+            1,
+            5);
+
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(modelClient).chat(prompt.capture());
+        String value = prompt.getValue();
+        assertTrue(value.contains("profile_search_relevant"));
+        assertTrue(value.contains("knowledge mastery state"));
+        assertTrue(value.contains("next-reading recommendation"));
+        assertTrue(value.contains("previous knowledge relation"));
+        assertTrue(value.contains("standaloneQuestion"));
+        assertTrue(value.contains("minScore"));
+    }
+
+
+    @Test
     void shouldLimitOptionsToThree() {
         when(modelClient.chat(anyString())).thenReturn("""
             {
@@ -265,6 +290,18 @@ class ExternalMcpToolPlannerServiceTest {
                 List.of("owner", "repo", "path")),
             descriptor("get_repo", "Get repository metadata by owner and repo.", List.of("owner", "repo")),
             descriptor("create_file", "Create or update a file.", List.of("owner", "repo", "path", "content")));
+    }
+
+    private List<Map<String, Object>> selfLocalProfileTools() {
+        return List.of(Map.of(
+            "serverName", "self-local",
+            "toolName", "profile_search_relevant",
+            "description", "Search user profile snippets for style, reading understanding state, knowledge mastery state, next-reading recommendation, and previous knowledge relation.",
+            "inputSchema", Map.of(
+                "type", "object",
+                "properties", Map.of(
+                    "standaloneQuestion", Map.of("type", "string"),
+                    "minScore", Map.of("type", "number")))));
     }
 
     private Map<String, Object> descriptor(String toolName, String description, List<String> required) {

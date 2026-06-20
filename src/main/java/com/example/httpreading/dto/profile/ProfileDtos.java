@@ -40,10 +40,29 @@ public final class ProfileDtos {
         LocalDateTime updatedAt) {
     }
 
+    public record UserKnowledgeStateDto(
+        Long id,
+        String userId,
+        String domain,
+        String topic,
+        String knowledgeType,
+        String level,
+        double confidence,
+        String masteredEvidence,
+        String weaknessEvidence,
+        Long relatedBookId,
+        String relatedBookTitle,
+        Integer relatedChapterIndex,
+        List<Long> sourceEvidenceIds,
+        String summary,
+        LocalDateTime updatedAt) {
+    }
+
     public record ProfileOverviewResponse(
         String userId,
         StyleProfileDto styleProfile,
-        List<ReadingUnderstandingProfileDto> readingUnderstandingProfiles) {
+        List<ReadingUnderstandingProfileDto> readingUnderstandingProfiles,
+        List<UserKnowledgeStateDto> knowledgeStates) {
     }
 
     public record ProfileUpdateRequest(
@@ -88,6 +107,20 @@ public final class ProfileDtos {
         Double confidenceDelta) {
     }
 
+    public record KnowledgeStatePatch(
+        String domain,
+        String topic,
+        String knowledgeType,
+        String level,
+        Double confidenceDelta,
+        String masteredEvidence,
+        String weaknessEvidence,
+        String summary,
+        Long relatedBookId,
+        String relatedBookTitle,
+        Integer relatedChapterIndex) {
+    }
+
     public record NewEvidencePatch(
         String evidenceDomain,
         String evidenceType,
@@ -102,6 +135,7 @@ public final class ProfileDtos {
     public record ProfileUpdatePatch(
         StyleProfilePatch stylePatch,
         List<ReadingProfilePatch> readingPatches,
+        List<KnowledgeStatePatch> knowledgePatches,
         List<NewEvidencePatch> newEvidence,
         String summary) {
     }

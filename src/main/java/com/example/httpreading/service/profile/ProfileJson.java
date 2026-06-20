@@ -12,6 +12,8 @@ import org.springframework.stereotype.Component;
 public class ProfileJson {
     private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {
     };
+    private static final TypeReference<List<Long>> LONG_LIST = new TypeReference<>() {
+    };
 
     private final ObjectMapper objectMapper;
 
@@ -49,6 +51,21 @@ public class ProfileJson {
                 .toList());
         } catch (JsonProcessingException exception) {
             return "[]";
+        }
+    }
+
+    public List<Long> readLongList(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            List<Long> list = objectMapper.readValue(json, LONG_LIST);
+            return list == null ? List.of() : list.stream()
+                .filter(value -> value != null && value > 0)
+                .distinct()
+                .toList();
+        } catch (Exception ignored) {
+            return List.of();
         }
     }
 

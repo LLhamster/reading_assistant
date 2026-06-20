@@ -1,9 +1,11 @@
 package com.example.httpreading.service.profile;
 
 import com.example.httpreading.domain.profile.ReadingUnderstandingProfile;
+import com.example.httpreading.domain.profile.UserKnowledgeState;
 import com.example.httpreading.domain.profile.UserStyleProfile;
 import com.example.httpreading.dto.profile.ProfileDtos.ReadingUnderstandingProfileDto;
 import com.example.httpreading.dto.profile.ProfileDtos.StyleProfileDto;
+import com.example.httpreading.dto.profile.ProfileDtos.UserKnowledgeStateDto;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -52,5 +54,27 @@ public class ProfileMapper {
             profile.getLastEvidenceId(),
             profile.getEvidenceCount() == null ? 0 : profile.getEvidenceCount(),
             profile.getUpdatedAt());
+    }
+
+    public UserKnowledgeStateDto toDto(UserKnowledgeState state) {
+        if (state == null) {
+            return null;
+        }
+        return new UserKnowledgeStateDto(
+            state.getId(),
+            state.getUserId(),
+            state.getDomain(),
+            state.getTopic(),
+            state.getKnowledgeType(),
+            state.getLevel(),
+            state.getConfidence() == null ? 0.5d : state.getConfidence(),
+            state.getMasteredEvidence(),
+            state.getWeaknessEvidence(),
+            state.getRelatedBookId(),
+            state.getRelatedBookTitle(),
+            state.getRelatedChapterIndex(),
+            json.readLongList(state.getSourceEvidenceIds()),
+            state.getSummary(),
+            state.getUpdatedAt());
     }
 }
