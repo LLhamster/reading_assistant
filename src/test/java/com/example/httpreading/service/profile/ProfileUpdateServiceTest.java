@@ -19,10 +19,12 @@ import com.example.httpreading.domain.profile.ReadingUnderstandingProfile;
 import com.example.httpreading.domain.profile.UserKnowledgeState;
 import com.example.httpreading.domain.profile.UserStyleProfile;
 import com.example.httpreading.dto.profile.ProfileDtos.KnowledgeStatePatch;
+import com.example.httpreading.dto.profile.ProfileDtos.ManualStyleProfileRequest;
 import com.example.httpreading.dto.profile.ProfileDtos.NewEvidencePatch;
 import com.example.httpreading.dto.profile.ProfileDtos.ProfileUpdatePatch;
 import com.example.httpreading.dto.profile.ProfileDtos.ProfileUpdateRequest;
 import com.example.httpreading.dto.profile.ProfileDtos.ReadingProfilePatch;
+import com.example.httpreading.dto.profile.ProfileDtos.StyleProfilePatch;
 import com.example.httpreading.repository.BooksRepository;
 import com.example.httpreading.repository.ProfileUpdateLogRepository;
 import com.example.httpreading.service.AgentMemoryService;
@@ -73,6 +75,7 @@ class ProfileUpdateServiceTest {
         when(styleProfileService.findByUserId("u1")).thenReturn(Optional.of(styleProfile()));
         when(styleProfileService.getOrCreate("u1")).thenReturn(styleProfile());
         when(styleProfileService.updateStyleProfile(anyString(), any())).thenReturn(styleProfile());
+        when(styleProfileService.replaceStyleProfile(anyString(), any())).thenReturn(styleProfile());
         when(readingProfileService.listByUser("u1")).thenReturn(List.of());
         when(readingProfileService.updateReadingProfile(anyString(), anyString(), any(), any()))
             .thenReturn(readingProfile());
@@ -165,8 +168,57 @@ class ProfileUpdateServiceTest {
         verify(updateLogRepository, never()).save(any());
     }
 
+    @Test
+    void manualStyleUpdateWritesStyleAndSyncsVector() {
+        var response = service.updateStyleManually(styleRequest());
+
+        assertEquals("success", response.status());
+        assertEquals("u1", response.userId());
+        ArgumentCaptor<StyleProfilePatch> patch = ArgumentCaptor.forClass(StyleProfilePatch.class);
+        verify(styleProfileService).replaceStyleProfile(anyString(), patch.capture());
+        assertEquals("直接讲故事", patch.getValue().explanationStyle());
+        assertEquals("详细但不啰嗦", patch.getValue().preferredDepth());
+        assertEquals(true, patch.getValue().prefersExamples());
+        assertEquals(false, patch.getValue().prefersStepByStep());
+        assertEquals(List.of("教科书式", "模板化"), patch.getValue().avoidance());
+        verify(vectorIndexService).upsertStyleStateVector(any());
+        verify(evidenceService, never()).saveEvidence(any());
+    }
+
+    @Test
+    void manualStyleUpdateUsesGuestSessionResolver() {
+        service.updateStyleManually(new ManualStyleProfileRequest(
+            null, "session-1", "", "", false, false, false, List.of(), ""));
+
+        verify(userResolver).resolve(null, "session-1");
+    }
+
+    @Test
+    void manualStyleVectorFailureReturnsWarningWithoutRollback() {
+        when(vectorIndexService.upsertStyleStateVector(any())).thenReturn(false);
+
+        var response = service.updateStyleManually(styleRequest());
+
+        assertEquals("success_with_warning", response.status());
+        assertEquals(List.of("sync_failed:style"), response.warnings());
+        verify(styleProfileService).replaceStyleProfile(anyString(), any());
+    }
+
     private ProfileUpdateRequest request() {
         return new ProfileUpdateRequest("u1", "s1", 44L, 1, "社会学", "请完整举例");
+    }
+
+    private ManualStyleProfileRequest styleRequest() {
+        return new ManualStyleProfileRequest(
+            "u1",
+            "s1",
+            "直接讲故事",
+            "详细但不啰嗦",
+            true,
+            true,
+            false,
+            List.of("教科书式", "模板化"),
+            "用户喜欢完整案例和背景解释。");
     }
 
     private UserStyleProfile styleProfile() {

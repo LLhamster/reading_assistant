@@ -83,6 +83,25 @@ public final class ProfileDtos {
         int usedMemoryCount) {
     }
 
+    public record ManualStyleProfileRequest(
+        String userId,
+        String sessionId,
+        String explanationStyle,
+        String preferredDepth,
+        Boolean prefersExamples,
+        Boolean prefersStorytelling,
+        Boolean prefersStepByStep,
+        List<String> avoidance,
+        String summary) {
+    }
+
+    public record ManualStyleProfileResponse(
+        String status,
+        String userId,
+        StyleProfileDto styleProfile,
+        List<String> warnings) {
+    }
+
     public record StyleProfilePatch(
         String explanationStyle,
         String preferredDepth,

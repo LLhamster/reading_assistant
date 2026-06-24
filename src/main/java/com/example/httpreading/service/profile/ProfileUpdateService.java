@@ -11,12 +11,15 @@ import com.example.httpreading.domain.profile.ReadingUnderstandingProfile;
 import com.example.httpreading.domain.profile.UserKnowledgeState;
 import com.example.httpreading.domain.profile.UserStyleProfile;
 import com.example.httpreading.dto.profile.ProfileDtos.KnowledgeStatePatch;
+import com.example.httpreading.dto.profile.ProfileDtos.ManualStyleProfileRequest;
+import com.example.httpreading.dto.profile.ProfileDtos.ManualStyleProfileResponse;
 import com.example.httpreading.dto.profile.ProfileDtos.NewEvidencePatch;
 import com.example.httpreading.dto.profile.ProfileDtos.ProfileOverviewResponse;
 import com.example.httpreading.dto.profile.ProfileDtos.ProfileUpdatePatch;
 import com.example.httpreading.dto.profile.ProfileDtos.ProfileUpdateRequest;
 import com.example.httpreading.dto.profile.ProfileDtos.ProfileUpdateResponse;
 import com.example.httpreading.dto.profile.ProfileDtos.ReadingProfilePatch;
+import com.example.httpreading.dto.profile.ProfileDtos.StyleProfilePatch;
 import com.example.httpreading.memory.model.MemoryItem;
 import com.example.httpreading.repository.ProfileUpdateLogRepository;
 import com.example.httpreading.service.AgentMemoryService;
@@ -201,6 +204,30 @@ public class ProfileUpdateService {
             profileMapper.toDto(styleProfileService.getOrCreate(userId)),
             readingProfileService.listByUser(userId).stream().map(profileMapper::toDto).toList(),
             knowledgeStateService.listByUser(userId).stream().map(profileMapper::toDto).toList());
+    }
+
+    @Transactional
+    public ManualStyleProfileResponse updateStyleManually(ManualStyleProfileRequest request) {
+        String userId = userResolver.resolve(request == null ? null : request.userId(),
+            request == null ? null : request.sessionId());
+        UserStyleProfile styleProfile = styleProfileService.replaceStyleProfile(userId, new StyleProfilePatch(
+            request == null ? null : request.explanationStyle(),
+            request == null ? null : request.preferredDepth(),
+            request != null && request.prefersExamples() != null ? request.prefersExamples() : false,
+            request != null && request.prefersStorytelling() != null ? request.prefersStorytelling() : false,
+            request != null && request.prefersStepByStep() != null ? request.prefersStepByStep() : false,
+            request == null ? List.of() : request.avoidance(),
+            request == null ? null : request.summary(),
+            null));
+        List<String> warnings = new ArrayList<>();
+        if (!vectorIndexService.upsertStyleStateVector(styleProfile)) {
+            warnings.add("sync_failed:style");
+        }
+        return new ManualStyleProfileResponse(
+            warnings.isEmpty() ? "success" : "success_with_warning",
+            userId,
+            profileMapper.toDto(styleProfile),
+            warnings);
     }
 
     private List<ProfileGrowthEvidence> saveEvidence(String userId, ProfileUpdatePatch patch) {

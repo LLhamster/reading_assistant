@@ -1,12 +1,15 @@
 package com.example.httpreading.controller;
 
 import com.example.httpreading.api.CommonResponse;
+import com.example.httpreading.dto.profile.ProfileDtos.ManualStyleProfileRequest;
+import com.example.httpreading.dto.profile.ProfileDtos.ManualStyleProfileResponse;
 import com.example.httpreading.dto.profile.ProfileDtos.ProfileOverviewResponse;
 import com.example.httpreading.dto.profile.ProfileDtos.ProfileUpdateRequest;
 import com.example.httpreading.dto.profile.ProfileDtos.ProfileUpdateResponse;
 import com.example.httpreading.service.profile.ProfileUpdateService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -31,5 +34,10 @@ public class ProfileController {
     public CommonResponse<ProfileOverviewResponse> overview(@RequestParam(required = false) String userId,
                                                             @RequestParam(required = false) String sessionId) {
         return CommonResponse.success(profileUpdateService.overview(userId, sessionId));
+    }
+
+    @PutMapping("/style")
+    public CommonResponse<ManualStyleProfileResponse> updateStyle(@RequestBody(required = false) ManualStyleProfileRequest request) {
+        return CommonResponse.success(profileUpdateService.updateStyleManually(request));
     }
 }

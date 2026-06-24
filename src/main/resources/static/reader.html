@@ -724,6 +724,13 @@
       margin-bottom: 8px;
     }
 
+    .ai-profile-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
     .ai-title {
       font-family: 'Cormorant Garamond', Georgia, serif;
       font-size: 22px;
@@ -1164,6 +1171,113 @@
       margin-top: 12px;
     }
 
+    /* ========== 风格画像弹窗 ========== */
+    .profile-style-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.4);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 210;
+      padding: 20px;
+    }
+
+    .profile-style-card {
+      width: 520px;
+      max-width: 100%;
+      max-height: 88vh;
+      overflow-y: auto;
+      background: var(--bg-secondary);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-lg);
+      padding: 24px;
+    }
+
+    .profile-style-card h2 {
+      font-size: 24px;
+      margin-bottom: 18px;
+    }
+
+    .profile-style-field {
+      margin-bottom: 14px;
+    }
+
+    .profile-style-field label {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--text-secondary);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .profile-style-field input,
+    .profile-style-field textarea {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-family: inherit;
+      font-size: 13px;
+      color: var(--text-primary);
+      background: var(--bg-secondary);
+    }
+
+    .profile-style-field textarea {
+      min-height: 74px;
+      resize: vertical;
+    }
+
+    .profile-style-field input:focus,
+    .profile-style-field textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-light);
+    }
+
+    .profile-style-toggles {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .profile-style-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-secondary);
+      font-size: 12px;
+      background: var(--bg-tertiary);
+    }
+
+    .profile-style-toggle input {
+      flex: 0 0 auto;
+    }
+
+    .profile-style-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .profile-style-actions button {
+      flex: 1;
+    }
+
+    #profileStyleMsg {
+      min-height: 18px;
+      margin-top: 12px;
+      color: var(--text-muted);
+      font-size: 12px;
+      text-align: center;
+    }
+
     /* ========== 响应式 ========== */
     @media (max-width: 1024px) {
       .news-grid { grid-template-columns: repeat(2, 1fr); }
@@ -1180,6 +1294,7 @@
       .news-grid { grid-template-columns: 1fr; }
       .news-card.featured { grid-column: span 1; }
       .page { padding: 20px 16px calc(var(--nav-height) + 16px); }
+      .profile-style-toggles { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -1242,7 +1357,10 @@
       <div class="ai-panel-header">
         <div class="ai-title-row">
           <div class="ai-title">阅读 Agent</div>
-          <button id="aiProfileUpdateBtn" class="ai-profile-btn" onclick="updateUserProfile()" title="更新用户画像">更新画像</button>
+          <div class="ai-profile-actions">
+            <button id="aiProfileStyleBtn" class="ai-profile-btn" onclick="openStyleProfileEditor()" title="查看和编辑用户风格">编辑风格</button>
+            <button id="aiProfileUpdateBtn" class="ai-profile-btn" onclick="updateUserProfile()" title="更新用户画像">更新画像</button>
+          </div>
         </div>
         <div class="ai-subtitle">围绕当前章节提问，结合阅读上下文、记忆与书籍片段回答。</div>
         <div class="ai-session" id="aiSessionLabel">未选择书籍</div>
@@ -1348,6 +1466,39 @@
   </div>
 </div>
 
+<!-- ========== 风格画像弹窗 ========== -->
+<div id="profileStyleOverlay" class="profile-style-overlay">
+  <div class="profile-style-card">
+    <h2>风格画像</h2>
+    <div class="profile-style-field">
+      <label for="profileStyleExplanation">解释风格</label>
+      <input id="profileStyleExplanation" type="text" placeholder="例如：直接讲故事，最后回扣原文观点" />
+    </div>
+    <div class="profile-style-field">
+      <label for="profileStyleDepth">回答深度</label>
+      <input id="profileStyleDepth" type="text" placeholder="例如：详细但不啰嗦" />
+    </div>
+    <div class="profile-style-toggles">
+      <label class="profile-style-toggle"><input id="profileStyleExamples" type="checkbox" /> 完整例子</label>
+      <label class="profile-style-toggle"><input id="profileStyleStorytelling" type="checkbox" /> 故事化</label>
+      <label class="profile-style-toggle"><input id="profileStyleStepByStep" type="checkbox" /> 分步骤</label>
+    </div>
+    <div class="profile-style-field">
+      <label for="profileStyleAvoidance">避免项</label>
+      <textarea id="profileStyleAvoidance" placeholder="每行一个，例如：教科书式&#10;空泛&#10;模板化"></textarea>
+    </div>
+    <div class="profile-style-field">
+      <label for="profileStyleSummary">风格摘要</label>
+      <textarea id="profileStyleSummary" placeholder="概括你希望阅读 Agent 如何回答你"></textarea>
+    </div>
+    <div class="profile-style-actions">
+      <button class="btn btn-secondary" type="button" onclick="closeStyleProfileEditor()">取消</button>
+      <button id="profileStyleSaveBtn" class="btn btn-primary" type="button" onclick="saveStyleProfile()">保存</button>
+    </div>
+    <div id="profileStyleMsg"></div>
+  </div>
+</div>
+
 <script>
 // ========== 全局状态 ==========
 let currentUser = null;
@@ -1364,6 +1515,8 @@ let aiContextId = null;
 let aiMessages = [];
 let aiLoading = false;
 let profileUpdating = false;
+let profileStyleLoading = false;
+let profileStyleSaving = false;
 let selectedReadingContext = null;
 const guestUserId = 'guest_' + Date.now();
 const defaultReaderStyle = { fontSize: 16, lineHeight: '2', font: 'serif' };
@@ -1445,6 +1598,13 @@ function restoreUser() {
 
 function hasAuthUser() {
   return !!(currentUser && currentUser.token);
+}
+
+function profileIdentity() {
+  return {
+    userId: hasAuthUser() && currentUser.id != null ? String(currentUser.id) : null,
+    sessionId: hasAuthUser() ? (aiSessionId || guestUserId) : guestUserId
+  };
 }
 
 // ========== 阅读样式 ==========
@@ -1808,6 +1968,7 @@ function updateAiPanelState(chapterTitle) {
   const label = document.getElementById('aiSessionLabel');
   const hint = document.getElementById('aiInputHint');
   const profileBtn = document.getElementById('aiProfileUpdateBtn');
+  const styleBtn = document.getElementById('aiProfileStyleBtn');
   if (!input || !sendBtn || !label || !hint) return;
 
   const hasBook = !!currentBookId;
@@ -1816,6 +1977,10 @@ function updateAiPanelState(chapterTitle) {
   if (profileBtn) {
     profileBtn.disabled = profileUpdating;
     profileBtn.textContent = profileUpdating ? '更新中...' : '更新画像';
+  }
+  if (styleBtn) {
+    styleBtn.disabled = profileStyleLoading || profileStyleSaving;
+    styleBtn.textContent = profileStyleLoading ? '加载中...' : '编辑风格';
   }
   input.placeholder = hasBook ? '围绕当前章节提问...' : '先选择一本书，然后向我提问...';
   label.textContent = hasBook
@@ -1953,10 +2118,7 @@ async function updateUserProfile() {
   profileUpdating = true;
   renderAiMessages();
   try {
-    const userId = hasAuthUser() && currentUser.id != null ? String(currentUser.id) : null;
-    const sessionId = hasAuthUser()
-      ? (aiSessionId || guestUserId)
-      : guestUserId;
+    const { userId, sessionId } = profileIdentity();
     const resp = await api('POST', '/api/profile/update', {
       userId,
       sessionId,
@@ -1990,6 +2152,126 @@ async function updateUserProfile() {
     });
   } finally {
     profileUpdating = false;
+    renderAiMessages();
+  }
+}
+
+async function openStyleProfileEditor() {
+  if (profileStyleLoading || profileStyleSaving) return;
+  const overlay = document.getElementById('profileStyleOverlay');
+  const msg = document.getElementById('profileStyleMsg');
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+  if (msg) msg.textContent = '正在加载风格画像...';
+  profileStyleLoading = true;
+  updateAiPanelState();
+  updateProfileStyleSaveState();
+  try {
+    const { userId, sessionId } = profileIdentity();
+    const params = new URLSearchParams();
+    if (userId) params.set('userId', userId);
+    if (sessionId) params.set('sessionId', sessionId);
+    const overview = await api('GET', '/api/profile' + (params.toString() ? '?' + params.toString() : ''));
+    fillStyleProfileForm((overview && overview.styleProfile) || {});
+    if (msg) msg.textContent = '';
+  } catch (e) {
+    if (msg) msg.textContent = '风格画像加载失败：' + (e && e.message ? e.message : '请稍后重试');
+  } finally {
+    profileStyleLoading = false;
+    updateAiPanelState();
+    updateProfileStyleSaveState();
+  }
+}
+
+function closeStyleProfileEditor(force) {
+  if (profileStyleSaving && !force) return;
+  const overlay = document.getElementById('profileStyleOverlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function fillStyleProfileForm(styleProfile) {
+  setInputValue('profileStyleExplanation', styleProfile.explanationStyle || '');
+  setInputValue('profileStyleDepth', styleProfile.preferredDepth || '');
+  setCheckedValue('profileStyleExamples', !!styleProfile.prefersExamples);
+  setCheckedValue('profileStyleStorytelling', !!styleProfile.prefersStorytelling);
+  setCheckedValue('profileStyleStepByStep', !!styleProfile.prefersStepByStep);
+  setInputValue('profileStyleAvoidance', Array.isArray(styleProfile.avoidance) ? styleProfile.avoidance.join('\n') : '');
+  setInputValue('profileStyleSummary', styleProfile.summary || '');
+}
+
+function setInputValue(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.value = value;
+}
+
+function setCheckedValue(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.checked = value;
+}
+
+function getInputValue(id) {
+  const el = document.getElementById(id);
+  return el ? el.value.trim() : '';
+}
+
+function getCheckedValue(id) {
+  const el = document.getElementById(id);
+  return !!(el && el.checked);
+}
+
+function avoidanceFromEditor() {
+  return getInputValue('profileStyleAvoidance')
+    .split(/\n|,/)
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
+function updateProfileStyleSaveState() {
+  const saveBtn = document.getElementById('profileStyleSaveBtn');
+  if (saveBtn) {
+    saveBtn.disabled = profileStyleLoading || profileStyleSaving;
+    saveBtn.textContent = profileStyleSaving ? '保存中...' : '保存';
+  }
+}
+
+async function saveStyleProfile() {
+  if (profileStyleLoading || profileStyleSaving) return;
+  const msg = document.getElementById('profileStyleMsg');
+  profileStyleSaving = true;
+  if (msg) msg.textContent = '正在保存风格画像...';
+  updateAiPanelState();
+  updateProfileStyleSaveState();
+  try {
+    const { userId, sessionId } = profileIdentity();
+    const resp = await api('PUT', '/api/profile/style', {
+      userId,
+      sessionId,
+      explanationStyle: getInputValue('profileStyleExplanation'),
+      preferredDepth: getInputValue('profileStyleDepth'),
+      prefersExamples: getCheckedValue('profileStyleExamples'),
+      prefersStorytelling: getCheckedValue('profileStyleStorytelling'),
+      prefersStepByStep: getCheckedValue('profileStyleStepByStep'),
+      avoidance: avoidanceFromEditor(),
+      summary: getInputValue('profileStyleSummary')
+    });
+    let content = '风格画像已更新';
+    if (resp && resp.warnings && resp.warnings.length) {
+      const hasSyncFailed = resp.warnings.some(item => String(item || '').includes('sync_failed'));
+      content += '\n\n提醒：\n';
+      content += hasSyncFailed
+        ? '- 风格已更新，但向量索引同步失败，后续可重试。'
+        : resp.warnings.map(item => '- ' + item).join('\n');
+    }
+    aiMessages.push({ role: 'system', content });
+    closeStyleProfileEditor(true);
+  } catch (e) {
+    const text = '风格保存失败：' + (e && e.message ? e.message : '请稍后重试');
+    if (msg) msg.textContent = text;
+    aiMessages.push({ role: 'system', content: text });
+  } finally {
+    profileStyleSaving = false;
+    updateAiPanelState();
+    updateProfileStyleSaveState();
     renderAiMessages();
   }
 }
@@ -2242,6 +2524,12 @@ document.getElementById('aiMessages').addEventListener('click', function(e) {
   const customButton = e.target.closest('.ai-custom-confirm');
   if (customButton) {
     confirmAiCustom(Number(customButton.dataset.msgIndex));
+  }
+});
+
+document.getElementById('profileStyleOverlay').addEventListener('click', function(e) {
+  if (e.target === this) {
+    closeStyleProfileEditor();
   }
 });
 
