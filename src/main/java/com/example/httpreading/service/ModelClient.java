@@ -18,7 +18,6 @@ public class ModelClient {
     private static final Logger log = LoggerFactory.getLogger(ModelClient.class);
     private static final int MAX_CHAT_ATTEMPTS = 3;
     private static final long RETRY_BASE_DELAY_MS = 800L;
-    private static final long OVERLOAD_RETRY_DELAY_MS = 30_000L;
 
     private static final OkHttpClient HTTP_CLIENT =
             new OkHttpClient.Builder()
@@ -28,6 +27,12 @@ public class ModelClient {
     @Value("${model.apiKey:}")
     private String apiKey;
 
+    @Value("${model.baseUrl:https://api.deepseek.com/chat/completions}")
+    private String baseUrl;
+
+    @Value("${model.chatModel:deepseek-chat}")
+    private String chatModel;
+
     @Value("${model.dashscope.apiKey:${model.embedding.apiKey:}}")
     private String dashscopeApiKey;
 
@@ -36,13 +41,12 @@ public class ModelClient {
 
     public String chat(String question) {
         ModelClientException lastException = null;
-        int maxAttempts = chatMaxAttempts();
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+        for (int attempt = 1; attempt <= MAX_CHAT_ATTEMPTS; attempt++) {
             try {
                 return doChat(question, attempt);
             } catch (ModelClientException exception) {
                 lastException = exception;
-                if (!exception.retryable() || attempt >= maxAttempts) {
+                if (!exception.retryable() || attempt >= MAX_CHAT_ATTEMPTS) {
                     throw exception;
                 }
                 sleepBeforeRetry(attempt, exception);
@@ -56,7 +60,7 @@ public class ModelClient {
     private String doChat(String question, int attempt) {
         try {
             JSONObject root = new JSONObject();
-            root.put("model", "moonshot-v1-8k");
+            root.put("model", chatModel());
             JSONArray messages = new JSONArray();
             JSONObject userMsg = new JSONObject();
             userMsg.put("role", "user");
@@ -69,7 +73,7 @@ public class ModelClient {
             RequestBody body = RequestBody.create(mediaType, root.toString());
 
             Request.Builder builder = new Request.Builder()
-                    .url("https://api.moonshot.cn/v1/chat/completions")
+                    .url(chatUrl())
                     .method("POST", body)
                     .addHeader("Content-Type", "application/json");
             if (apiKey != null && !apiKey.isBlank()) {
@@ -113,28 +117,35 @@ public class ModelClient {
         return statusCode == 408 || statusCode == 409 || statusCode == 429 || statusCode >= 500;
     }
 
+    private String chatUrl() {
+        return firstNonBlank(System.getProperty("model.baseUrl"),
+            System.getProperty("model.chat.baseUrl"), baseUrl, "https://api.deepseek.com/chat/completions");
+    }
+
+    private String chatModel() {
+        return firstNonBlank(System.getProperty("model.chatModel"),
+            System.getProperty("model.chat.model"), chatModel, "deepseek-chat");
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return "";
+    }
+
     private void sleepBeforeRetry(int attempt, ModelClientException exception) {
-        long delayMs = retryDelayMs(attempt, exception);
+        long delayMs = RETRY_BASE_DELAY_MS * attempt;
         log.warn("模型调用失败，准备重试 attempt={}/{} delayMs={} statusCode={}",
-            attempt + 1, chatMaxAttempts(), delayMs, exception.statusCode());
+            attempt + 1, MAX_CHAT_ATTEMPTS, delayMs, exception.statusCode());
         try {
             Thread.sleep(delayMs);
         } catch (InterruptedException interruptedException) {
             Thread.currentThread().interrupt();
             throw new ModelClientException("模型调用重试等待被中断", exception.statusCode(), false, interruptedException);
         }
-    }
-
-    private int chatMaxAttempts() {
-        return Integer.getInteger("model.chat.maxAttempts", MAX_CHAT_ATTEMPTS);
-    }
-
-    private long retryDelayMs(int attempt, ModelClientException exception) {
-        if (exception.statusCode() == 429) {
-            return Long.getLong("model.chat.overloadRetryDelayMs",
-                Long.getLong("evaluation.overloadCooldownMs", OVERLOAD_RETRY_DELAY_MS));
-        }
-        return Long.getLong("model.chat.retryBaseDelayMs", RETRY_BASE_DELAY_MS) * attempt;
     }
 
     private String truncateLog(String value) {

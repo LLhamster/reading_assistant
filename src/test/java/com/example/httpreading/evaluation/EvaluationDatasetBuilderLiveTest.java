@@ -51,10 +51,18 @@ class EvaluationDatasetBuilderLiveTest {
         String apiKey = firstNonBlank(System.getProperty("model.apiKey"), System.getenv("MODEL_API_KEY"));
         assumeTrue(!apiKey.isBlank(), "Set -Dmodel.apiKey or MODEL_API_KEY");
         ModelClient modelClient = new ModelClient();
-        Field field = ModelClient.class.getDeclaredField("apiKey");
-        field.setAccessible(true);
-        field.set(modelClient, apiKey);
+        setField(modelClient, "apiKey", apiKey);
+        setField(modelClient, "baseUrl", firstNonBlank(System.getProperty("model.baseUrl"), System.getenv("MODEL_BASE_URL"),
+            "https://api.deepseek.com/chat/completions"));
+        setField(modelClient, "chatModel", firstNonBlank(System.getProperty("model.chatModel"), System.getenv("MODEL_CHAT_MODEL"),
+            System.getProperty("model.chat.model"), "deepseek-chat"));
         return modelClient;
+    }
+
+    private void setField(ModelClient modelClient, String name, String value) throws Exception {
+        Field field = ModelClient.class.getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(modelClient, value);
     }
 
     private String firstNonBlank(String... values) {

@@ -154,13 +154,6 @@ MODEL_API_KEY=... mvn -Dtest=ReadingEvaluationLiveTest \
 -Devaluation.overloadCooldownMs=30000
 ```
 
-`ModelClient` 对 429 会使用更长退避，默认等待 30 秒后再重试。也可以显式调整：
-
-```bash
--Dmodel.chat.maxAttempts=4
--Dmodel.chat.overloadRetryDelayMs=30000
-```
-
 `STRICT` 会执行三次 LLM Judge 并取各维度中位数。holdout 必须同时设置：
 
 ```bash

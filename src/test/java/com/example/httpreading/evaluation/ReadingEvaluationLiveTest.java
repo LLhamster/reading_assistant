@@ -29,7 +29,7 @@ class ReadingEvaluationLiveTest {
         List<EvaluationCases.EvaluationExample> cases = load("evaluation/tool-routing.jsonl");
         EvaluationReplayRunner runner = new EvaluationReplayRunner(objectMapper);
         EvaluationReport report = runner.run(cases, EvaluationCases.TOOL_ROUTING, split,
-            "PLANNER_AND_SELF_LOCAL_COMPONENTS", "moonshot-v1-8k", mode(), evaluationLimit(),
+            "PLANNER_AND_SELF_LOCAL_COMPONENTS", chatModelName(), mode(), evaluationLimit(),
             example -> predictRoute(model, example), deterministicJudge());
         write(report);
         System.out.printf("%n[TOOL_ROUTING_EVALUATION]%nsplit=%s%ntotal=%d%nscore=%.4f%nexactMatch=%.4f%nmodeAccuracy=%.4f%ntoolF1=%.4f%n",
@@ -48,7 +48,7 @@ class ReadingEvaluationLiveTest {
         EvaluationReplayRunner runner = new EvaluationReplayRunner(objectMapper);
         EvaluationJudge judge = answerJudge(model);
         EvaluationReport report = runner.run(cases, EvaluationCases.MULTI_TURN_QA, split,
-            "FINAL_ANSWER_COMPONENT_REPLAY", "moonshot-v1-8k", mode(), evaluationLimit(),
+            "FINAL_ANSWER_COMPONENT_REPLAY", chatModelName(), mode(), evaluationLimit(),
             example -> predictAnswer(model, example), judge);
         write(report);
         System.out.printf("%n[MULTI_TURN_READING_EVALUATION]%nsplit=%s%ntotal=%d%nscore=%.4f%npassed=%d%nfailed=%d%nunscored=%d%npassRate=%.4f%n",
@@ -169,10 +169,26 @@ class ReadingEvaluationLiveTest {
         String apiKey = firstNonBlank(System.getProperty("model.apiKey"), System.getenv("MODEL_API_KEY"));
         assumeTrue(!apiKey.isBlank(), "Set -Dmodel.apiKey or MODEL_API_KEY");
         ModelClient modelClient = new ModelClient();
-        Field field = ModelClient.class.getDeclaredField("apiKey");
-        field.setAccessible(true);
-        field.set(modelClient, apiKey);
+        setField(modelClient, "apiKey", apiKey);
+        setField(modelClient, "baseUrl", chatBaseUrl());
+        setField(modelClient, "chatModel", chatModelName());
         return modelClient;
+    }
+
+    private void setField(ModelClient modelClient, String name, String value) throws Exception {
+        Field field = ModelClient.class.getDeclaredField(name);
+        field.setAccessible(true);
+        field.set(modelClient, value);
+    }
+
+    private String chatBaseUrl() {
+        return firstNonBlank(System.getProperty("model.baseUrl"), System.getenv("MODEL_BASE_URL"),
+            "https://api.deepseek.com/chat/completions");
+    }
+
+    private String chatModelName() {
+        return firstNonBlank(System.getProperty("model.chatModel"), System.getenv("MODEL_CHAT_MODEL"),
+            System.getProperty("model.chat.model"), "deepseek-chat");
     }
 
     private String failed(EvaluationReport report) {

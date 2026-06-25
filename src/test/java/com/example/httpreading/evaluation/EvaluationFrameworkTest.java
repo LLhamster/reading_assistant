@@ -186,6 +186,17 @@ class EvaluationFrameworkTest {
         assertTrue(score.styleConstraintChecks().isEmpty());
     }
 
+    @Test
+    void judgeDoesNotRetryJsonRepairWhenModelCallFails() {
+        ModelClient model = mock(ModelClient.class);
+        when(model.chat(anyString())).thenThrow(new ModelClientException("模型接口请求失败: 429 attempt=3", 429, true));
+
+        EvaluationMetrics.JudgeScore score = judge(new LlmEvaluationJudge(model, objectMapper), EvaluationJudge.Mode.FAST);
+
+        assertTrue(!score.scored());
+        verify(model, times(1)).chat(anyString());
+    }
+
     private EvaluationCases.EvaluationExample example(String id, String source, String split, String question) {
         EvaluationCases.TaskInput input = new EvaluationCases.TaskInput(
             question, null, null, List.of(), List.of(), List.of());

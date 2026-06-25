@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.example.httpreading.service.ModelClient;
+import com.example.httpreading.service.ModelClientException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -65,6 +66,8 @@ final class LlmEvaluationJudge implements EvaluationJudge {
                 root.path("policy_violations").forEach(node -> violations.add(node.asText()));
                 return new EvaluationMetrics.JudgeScore(scores, violations, required, forbidden, style,
                     root.path("feedback").asText(), true, root.path("force_zero").asBoolean(false));
+            } catch (ModelClientException exception) {
+                return EvaluationMetrics.JudgeScore.unscored("judge model failed: " + exception.getMessage());
             } catch (Exception exception) {
                 lastError = exception.getMessage();
             }
