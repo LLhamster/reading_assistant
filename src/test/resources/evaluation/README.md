@@ -37,7 +37,11 @@ routing_score = 0.5 × mode/server correctness + 0.5 × tool F1
 
 ### 多轮最终回答
 
-`multi-turn-reading-qa.jsonl` 包含 50 条最终回答测试。测试运行前，多轮对话、当前页、RAG 证据以及 MCP 最终结果已经写入样本；运行时不再执行 MCP，只判断最终回答是否处于本题 rubric 规定的范围内。
+`multi-turn-reading-qa.jsonl` 包含 50 条最终回答测试。`MULTI_TURN_QA` 是 FinalAnswerService 级别的 replay 测试：测试运行前，多轮对话、当前页、RAG 证据以及 MCP 最终结果已经写入样本；运行时禁止再次规划或调用工具。
+
+该测试只判断最终回答本身是否合格，包括：是否理解本轮问题、承接历史对话、消解指代/省略/追问、正确使用给定证据、在证据不足时说明不足、完整满足用户要求、避免编造材料外事实、符合表达风格、避免模板化废话，并控制长度和结构。
+
+该测试不判断 Planner 路由、MCP 执行、RAG 召回、Memory/Profile 检索或 EvidenceAggregator 的质量。
 
 ```json
 {
@@ -68,6 +72,11 @@ routing_score = 0.5 × mode/server correctness + 0.5 × tool F1
       "allow_hypothetical_example": false,
       "must_label_hypothetical_example": false
     },
+    "must_include": [],
+    "must_not_include": [],
+    "style_constraints": [],
+    "answer_shape": "direct_answer",
+    "failure_mode": "",
     "max_chars": 500
   },
   "difficulty": "MEDIUM",
@@ -82,10 +91,17 @@ routing_score = 0.5 × mode/server correctness + 0.5 × tool F1
 
 ```text
 criterion_score = sum(criterion earned score) / max_score
-answer_score = criterion_score - length_penalty
+required_item_recall = matched_must_include_count / total_must_include_count
+forbidden_item_hit_rate = hit_must_not_include_count / total_must_not_include_count
+style_compliance = matched_style_constraints_count / total_style_constraints_count
+answer_score = criterion_score
+             - 0.15 × missing_required_item_count
+             - 0.10 × style_violation_count
+             - forbidden_penalty
+             - length_penalty
 ```
 
-违反 evidence_policy，例如把假设性例子冒充原文或 MCP 结果时，单条最高为 0.49。
+`must_include` 用于完整性检查，缺普通项只扣分，不直接判 0。`must_not_include` 用于禁止失败模式，Judge 会标注 low/medium/high 严重度。违反 evidence_policy 或 high severity 禁止项，例如把假设性例子冒充原文、编造材料外事实、证据不足时硬下结论，单条最高为 0.49。
 
 ## 数据拆分
 
@@ -115,6 +131,36 @@ MODEL_API_KEY=... mvn -Dtest=ReadingEvaluationLiveTest \
   -Devaluation.mode=FAST test
 ```
 
+模型服务过载或只想先查看最终回答文本时，可以关闭 Judge，调用量会从“每条约 2 次”降到“每条约 1 次”：
+
+```bash
+MODEL_API_KEY=... mvn -Dtest=ReadingEvaluationLiveTest \
+  -Devaluation.live.answer=true \
+  -Devaluation.judge=false \
+  -Devaluation.split=dev \
+  -Devaluation.limit=5 test
+```
+
+如果模型侧出现 429，可以加 case 间隔降低连续请求压力：
+
+```bash
+-Devaluation.caseDelayMs=1000
+```
+
+如果第一次 429 后后续请求也连续失败，建议让本轮评测在模型过载时先停下来，避免把整批样例都打成 unscored：
+
+```bash
+-Devaluation.stopOnModelOverload=true
+-Devaluation.overloadCooldownMs=30000
+```
+
+`ModelClient` 对 429 会使用更长退避，默认等待 30 秒后再重试。也可以显式调整：
+
+```bash
+-Dmodel.chat.maxAttempts=4
+-Dmodel.chat.overloadRetryDelayMs=30000
+```
+
 `STRICT` 会执行三次 LLM Judge 并取各维度中位数。holdout 必须同时设置：
 
 ```bash
@@ -123,10 +169,11 @@ MODEL_API_KEY=... mvn -Dtest=ReadingEvaluationLiveTest \
 
 报告写入 `target/evaluation/<run-id>/report.json` 和 `report.md`。
 
-低分和未通过样本默认只写入报告，不会导致 Maven 失败。报告包含 Agent 原始回答、每个 criterion 的得分与 Judge 理由、综合反馈和 evidence policy 违规信息。若需要在 CI 中把低于阈值视为测试失败，显式添加：
+低分、未通过样本和模型过载导致的 unscored 样本默认只写入报告，不会导致 Maven 失败。报告包含 Agent 原始回答、每个 criterion 的得分与 Judge 理由、综合反馈和 evidence policy 违规信息。若需要在 CI 中把低于阈值或 unscored 比例过高视为测试失败，显式添加：
 
 ```bash
 -Devaluation.failOnThreshold=true
+-Devaluation.failOnUnscored=true
 ```
 
 ## 候选数据制作

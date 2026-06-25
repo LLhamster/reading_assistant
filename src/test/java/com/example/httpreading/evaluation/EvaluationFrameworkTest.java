@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
+import com.example.httpreading.service.ModelClientException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.example.httpreading.service.ModelClient;
 import org.junit.jupiter.api.Test;
@@ -73,7 +74,8 @@ class EvaluationFrameworkTest {
             candidate.split(), candidate.evaluationMode(), candidate.model(), "different", candidate.numDev(),
             candidate.numHoldout(), candidate.evaluated(), candidate.passed(), candidate.unscored(), candidate.score(),
             candidate.modeAccuracy(), candidate.toolPrecision(), candidate.toolRecall(), candidate.toolF1(),
-            candidate.exactMatch(), candidate.evidenceRecall(), candidate.modelCalls(), candidate.inputChars(),
+            candidate.exactMatch(), candidate.evidenceRecall(), candidate.criterionScore(), candidate.requiredItemRecall(),
+            candidate.forbiddenItemHitRate(), candidate.styleCompliance(), candidate.modelCalls(), candidate.inputChars(),
             candidate.outputChars(), candidate.latencyMs(), candidate.estimatedCost(), candidate.cases(),
             candidate.categoryScores());
         assertThrows(IllegalArgumentException.class, () -> new EvaluationReportComparator().compare(baseline, different));
@@ -100,6 +102,58 @@ class EvaluationFrameworkTest {
     }
 
     @Test
+    void replayRunnerReportsUnscoredCasesWithoutFailingByDefault() {
+        EvaluationCases.TaskInput input = new EvaluationCases.TaskInput("question", null, null, List.of(
+            new EvaluationCases.DialogueTurn("user", "上轮问题"),
+            new EvaluationCases.DialogueTurn("assistant", "上轮回答")),
+            List.of(new EvaluationCases.CollectedEvidence("e1", "rag", "evidence", "content", Map.of())),
+            List.of(new EvaluationCases.McpResult("rag.search", true, Map.of())));
+        EvaluationCases.ExpectedBehavior behavior = new EvaluationCases.ExpectedBehavior(
+            List.of(new EvaluationCases.ScoringCriterion("answer", "Answer only from evidence.", 1)), 1,
+            new EvaluationCases.EvidencePolicy(true, false, false, false), 100);
+        EvaluationCases.EvaluationExample example = new EvaluationCases.EvaluationExample(
+            "unscored", EvaluationCases.MULTI_TURN_QA, input, null, behavior,
+            "EASY", "JUDGE", "golden", EvaluationCases.DEV, Map.of());
+        EvaluationReplayRunner runner = new EvaluationReplayRunner(objectMapper);
+
+        EvaluationReport report = runner.run(List.of(example), EvaluationCases.MULTI_TURN_QA, EvaluationCases.DEV,
+            "COMPONENT", "fixture", EvaluationJudge.Mode.FAST,
+            ignored -> new EvaluationReplayRunner.AgentResult(
+                new EvaluationMetrics.RoutingPrediction("", "", List.of()), "answer",
+                EvaluationMetrics.ExecutionTrace.empty()),
+            (evaluationCase, prediction, rules, mode) -> EvaluationMetrics.JudgeScore.unscored("judge disabled"));
+
+        assertEquals(1, report.unscored());
+        assertEquals(1, report.evaluated());
+    }
+
+    @Test
+    void replayRunnerCanStopOnModelOverload() {
+        String previous = System.getProperty("evaluation.stopOnModelOverload");
+        System.setProperty("evaluation.stopOnModelOverload", "true");
+        try {
+            List<EvaluationCases.EvaluationExample> examples = List.of(
+                example("a", "golden", EvaluationCases.DEV, "hello"),
+                example("b", "golden", EvaluationCases.DEV, "hello"));
+            EvaluationReplayRunner runner = new EvaluationReplayRunner(objectMapper);
+
+            EvaluationReport report = runner.run(examples, EvaluationCases.TOOL_ROUTING, EvaluationCases.DEV,
+                "COMPONENT", "fixture", EvaluationJudge.Mode.FAST, ignored -> {
+                    throw new ModelClientException("模型接口请求失败: 429 attempt=3", 429, true);
+                }, (evaluationCase, prediction, rules, mode) -> EvaluationMetrics.JudgeScore.unscored("not used"));
+
+            assertEquals(1, report.evaluated());
+            assertEquals(1, report.unscored());
+        } finally {
+            if (previous == null) {
+                System.clearProperty("evaluation.stopOnModelOverload");
+            } else {
+                System.setProperty("evaluation.stopOnModelOverload", previous);
+            }
+        }
+    }
+
+    @Test
     void fastAndStrictJudgeUseOneAndThreePasses() {
         ModelClient fastModel = mock(ModelClient.class);
         when(fastModel.chat(anyString())).thenReturn(judgeJson(0.8));
@@ -113,6 +167,23 @@ class EvaluationFrameworkTest {
         EvaluationMetrics.JudgeScore score = judge(strict, EvaluationJudge.Mode.STRICT);
         verify(strictModel, times(3)).chat(anyString());
         assertEquals(0.8, score.criterionScores().get(0).score(), 0.0001);
+    }
+
+    @Test
+    void judgeIgnoresPlaceholderChecksWhenExpectedListsAreEmpty() {
+        ModelClient model = mock(ModelClient.class);
+        when(model.chat(anyString())).thenReturn("""
+            {"criterion_scores":[{"id":"answer","score":1,"reason":"ok"}],
+             "required_item_checks":[{"item":"must_include 原文","matched":true,"reason":"placeholder"}],
+             "forbidden_item_checks":[{"item":"must_not_include 原文","hit":false,"severity":"low","reason":"placeholder"}],
+             "style_constraint_checks":[{"item":"style_constraints 原文","matched":true,"reason":"placeholder"}],
+             "policy_violations":[],"feedback":"ok"}
+            """);
+        EvaluationMetrics.JudgeScore score = judge(new LlmEvaluationJudge(model, objectMapper), EvaluationJudge.Mode.FAST);
+        assertTrue(score.scored());
+        assertTrue(score.requiredItemChecks().isEmpty());
+        assertTrue(score.forbiddenItemChecks().isEmpty());
+        assertTrue(score.styleConstraintChecks().isEmpty());
     }
 
     private EvaluationCases.EvaluationExample example(String id, String source, String split, String question) {
@@ -136,7 +207,8 @@ class EvaluationFrameworkTest {
         return new EvaluationReport("candidate", report.suite(), report.target(), report.split(), report.evaluationMode(),
             report.model(), report.datasetFingerprint(), report.numDev(), report.numHoldout(), report.evaluated(),
             report.passed(), report.unscored(), score, report.modeAccuracy(), report.toolPrecision(), report.toolRecall(),
-            report.toolF1(), report.exactMatch(), report.evidenceRecall(), report.modelCalls(), report.inputChars(),
+            report.toolF1(), report.exactMatch(), report.evidenceRecall(), report.criterionScore(), report.requiredItemRecall(),
+            report.forbiddenItemHitRate(), report.styleCompliance(), report.modelCalls(), report.inputChars(),
             report.outputChars(), report.latencyMs(), report.estimatedCost(), report.cases(), report.categoryScores());
     }
 

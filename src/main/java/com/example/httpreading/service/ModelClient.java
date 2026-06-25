@@ -18,6 +18,7 @@ public class ModelClient {
     private static final Logger log = LoggerFactory.getLogger(ModelClient.class);
     private static final int MAX_CHAT_ATTEMPTS = 3;
     private static final long RETRY_BASE_DELAY_MS = 800L;
+    private static final long OVERLOAD_RETRY_DELAY_MS = 30_000L;
 
     private static final OkHttpClient HTTP_CLIENT =
             new OkHttpClient.Builder()
@@ -35,12 +36,13 @@ public class ModelClient {
 
     public String chat(String question) {
         ModelClientException lastException = null;
-        for (int attempt = 1; attempt <= MAX_CHAT_ATTEMPTS; attempt++) {
+        int maxAttempts = chatMaxAttempts();
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 return doChat(question, attempt);
             } catch (ModelClientException exception) {
                 lastException = exception;
-                if (!exception.retryable() || attempt >= MAX_CHAT_ATTEMPTS) {
+                if (!exception.retryable() || attempt >= maxAttempts) {
                     throw exception;
                 }
                 sleepBeforeRetry(attempt, exception);
@@ -112,15 +114,27 @@ public class ModelClient {
     }
 
     private void sleepBeforeRetry(int attempt, ModelClientException exception) {
-        long delayMs = RETRY_BASE_DELAY_MS * attempt;
+        long delayMs = retryDelayMs(attempt, exception);
         log.warn("模型调用失败，准备重试 attempt={}/{} delayMs={} statusCode={}",
-            attempt + 1, MAX_CHAT_ATTEMPTS, delayMs, exception.statusCode());
+            attempt + 1, chatMaxAttempts(), delayMs, exception.statusCode());
         try {
             Thread.sleep(delayMs);
         } catch (InterruptedException interruptedException) {
             Thread.currentThread().interrupt();
             throw new ModelClientException("模型调用重试等待被中断", exception.statusCode(), false, interruptedException);
         }
+    }
+
+    private int chatMaxAttempts() {
+        return Integer.getInteger("model.chat.maxAttempts", MAX_CHAT_ATTEMPTS);
+    }
+
+    private long retryDelayMs(int attempt, ModelClientException exception) {
+        if (exception.statusCode() == 429) {
+            return Long.getLong("model.chat.overloadRetryDelayMs",
+                Long.getLong("evaluation.overloadCooldownMs", OVERLOAD_RETRY_DELAY_MS));
+        }
+        return Long.getLong("model.chat.retryBaseDelayMs", RETRY_BASE_DELAY_MS) * attempt;
     }
 
     private String truncateLog(String value) {

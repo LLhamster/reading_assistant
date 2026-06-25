@@ -49,16 +49,50 @@ final class EvaluationMetrics {
         }
     }
 
+    record RequiredItemCheck(String item, boolean matched, String reason) {
+        RequiredItemCheck {
+            item = item == null ? "" : item;
+            reason = reason == null ? "" : reason;
+        }
+    }
+
+    record ForbiddenItemCheck(String item, boolean hit, String severity, String reason) {
+        ForbiddenItemCheck {
+            item = item == null ? "" : item;
+            severity = normalizeSeverity(severity);
+            reason = reason == null ? "" : reason;
+        }
+    }
+
+    record StyleConstraintCheck(String item, boolean matched, String reason) {
+        StyleConstraintCheck {
+            item = item == null ? "" : item;
+            reason = reason == null ? "" : reason;
+        }
+    }
+
     record JudgeScore(List<CriterionScore> criterionScores, List<String> policyViolations,
-                      String feedback, boolean scored) {
+                      List<RequiredItemCheck> requiredItemChecks,
+                      List<ForbiddenItemCheck> forbiddenItemChecks,
+                      List<StyleConstraintCheck> styleConstraintChecks,
+                      String feedback, boolean scored, boolean forceZero) {
         JudgeScore {
             criterionScores = criterionScores == null ? List.of() : List.copyOf(criterionScores);
             policyViolations = policyViolations == null ? List.of() : List.copyOf(policyViolations);
+            requiredItemChecks = requiredItemChecks == null ? List.of() : List.copyOf(requiredItemChecks);
+            forbiddenItemChecks = forbiddenItemChecks == null ? List.of() : List.copyOf(forbiddenItemChecks);
+            styleConstraintChecks = styleConstraintChecks == null ? List.of() : List.copyOf(styleConstraintChecks);
             feedback = feedback == null ? "" : feedback;
         }
 
+        JudgeScore(List<CriterionScore> criterionScores, List<String> policyViolations,
+                   String feedback, boolean scored) {
+            this(criterionScores, policyViolations, List.of(), List.of(), List.of(), feedback, scored, false);
+        }
+
         static JudgeScore unscored(String feedback) {
-            return new JudgeScore(List.of(), List.of("judge_unscored"), feedback, false);
+            return new JudgeScore(List.of(), List.of("judge_unscored"), List.of(), List.of(), List.of(),
+                feedback, false, false);
         }
 
         double normalizedScore() {
@@ -66,9 +100,41 @@ final class EvaluationMetrics {
             return maximum <= 0 ? 0.0
                 : criterionScores.stream().mapToDouble(CriterionScore::score).sum() / maximum;
         }
+
+        List<String> missingRequiredItems() {
+            return requiredItemChecks.stream().filter(check -> !check.matched()).map(RequiredItemCheck::item).toList();
+        }
+
+        List<String> forbiddenItemsHit() {
+            return forbiddenItemChecks.stream().filter(ForbiddenItemCheck::hit).map(ForbiddenItemCheck::item).toList();
+        }
+
+        List<String> styleViolations() {
+            return styleConstraintChecks.stream().filter(check -> !check.matched()).map(StyleConstraintCheck::item).toList();
+        }
+
+        double requiredItemRecall(EvaluationCases.ExpectedBehavior expected) {
+            int total = expected.mustInclude().size();
+            return total == 0 ? 1.0 : (double) (total - missingRequiredItems().size()) / total;
+        }
+
+        double forbiddenItemHitRate(EvaluationCases.ExpectedBehavior expected) {
+            int total = expected.mustNotInclude().size();
+            return total == 0 ? 0.0 : (double) forbiddenItemsHit().size() / total;
+        }
+
+        double styleCompliance(EvaluationCases.ExpectedBehavior expected) {
+            int total = expected.styleConstraints().size();
+            return total == 0 ? 1.0 : (double) (total - styleViolations().size()) / total;
+        }
+
+        boolean hasHighSeverityForbiddenHit() {
+            return forbiddenItemChecks.stream().anyMatch(check -> check.hit() && "high".equals(check.severity()));
+        }
     }
 
-    record AnswerScore(RuleScore rules, JudgeScore judge, double overall) {
+    record AnswerScore(RuleScore rules, JudgeScore judge, double criterionScore, double requiredItemRecall,
+                       double forbiddenItemHitRate, double styleCompliance, double overall) {
     }
 
     static RoutingScore scoreRoute(EvaluationCases.ExpectedResult expected, RoutingPrediction actual) {
@@ -90,11 +156,49 @@ final class EvaluationMetrics {
     }
 
     /** Each case defines its own additive criteria; LLM Judge awards points criterion by criterion. */
+    static AnswerScore combineAnswer(EvaluationCases.ExpectedBehavior expected, RuleScore rules, JudgeScore judge) {
+        if (!judge.scored() || !rules.outputNonBlank()) {
+            return new AnswerScore(rules, judge, 0.0, 0.0, 0.0, 0.0, 0.0);
+        }
+        double criterion = judge.normalizedScore();
+        double requiredRecall = judge.requiredItemRecall(expected);
+        double forbiddenHitRate = judge.forbiddenItemHitRate(expected);
+        double styleCompliance = judge.styleCompliance(expected);
+        double overall = criterion
+            - 0.15 * judge.missingRequiredItems().size()
+            - 0.10 * judge.styleViolations().size()
+            - forbiddenPenalty(judge)
+            - rules.lengthPenalty();
+        overall = Math.max(0.0, Math.min(1.0, overall));
+        if (judge.forceZero()) overall = 0.0;
+        if (!judge.policyViolations().isEmpty() || judge.hasHighSeverityForbiddenHit()) {
+            overall = Math.min(0.49, overall);
+        }
+        return new AnswerScore(rules, judge, criterion, requiredRecall, forbiddenHitRate, styleCompliance, overall);
+    }
+
     static AnswerScore combineAnswer(RuleScore rules, JudgeScore judge) {
-        if (!judge.scored() || !rules.outputNonBlank()) return new AnswerScore(rules, judge, 0.0);
-        double overall = judge.normalizedScore() - rules.lengthPenalty();
-        if (!judge.policyViolations().isEmpty()) overall = Math.min(0.49, overall);
-        return new AnswerScore(rules, judge, Math.max(0.0, Math.min(1.0, overall)));
+        EvaluationCases.ExpectedBehavior empty = new EvaluationCases.ExpectedBehavior(
+            List.of(), 0, null, List.of(), List.of(), List.of(), "", "", 0);
+        return combineAnswer(empty, rules, judge);
+    }
+
+    private static double forbiddenPenalty(JudgeScore judge) {
+        return judge.forbiddenItemChecks().stream().filter(ForbiddenItemCheck::hit)
+            .mapToDouble(check -> switch (check.severity()) {
+                case "low" -> 0.05;
+                case "medium" -> 0.20;
+                case "high" -> 0.50;
+                default -> 0.10;
+            }).sum();
+    }
+
+    private static String normalizeSeverity(String severity) {
+        String value = severity == null ? "" : severity.trim().toLowerCase();
+        return switch (value) {
+            case "low", "medium", "high" -> value;
+            default -> "medium";
+        };
     }
 
     private static double lengthPenalty(int actualChars, int maxChars) {

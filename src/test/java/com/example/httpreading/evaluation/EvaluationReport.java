@@ -23,6 +23,10 @@ record EvaluationReport(
     double toolF1,
     double exactMatch,
     double evidenceRecall,
+    double criterionScore,
+    double requiredItemRecall,
+    double forbiddenItemHitRate,
+    double styleCompliance,
     long modelCalls,
     long inputChars,
     long outputChars,
@@ -37,13 +41,25 @@ record EvaluationReport(
 
     record CaseResult(String id, String category, double score, boolean passed, boolean hardPass,
                       boolean scored, String agentOutput, String feedback,
+                      double criterionScore, double requiredItemRecall,
+                      double forbiddenItemHitRate, double styleCompliance,
+                      List<String> missingRequiredItems,
+                      List<String> forbiddenItemsHit,
+                      List<String> styleViolations,
                       List<EvaluationMetrics.CriterionScore> criterionScores,
-                      List<String> policyViolations) {
+                      List<String> policyViolations,
+                      String answerShape,
+                      String failureMode) {
         CaseResult {
             agentOutput = agentOutput == null ? "" : agentOutput;
             feedback = feedback == null ? "" : feedback;
+            missingRequiredItems = missingRequiredItems == null ? List.of() : List.copyOf(missingRequiredItems);
+            forbiddenItemsHit = forbiddenItemsHit == null ? List.of() : List.copyOf(forbiddenItemsHit);
+            styleViolations = styleViolations == null ? List.of() : List.copyOf(styleViolations);
             criterionScores = criterionScores == null ? List.of() : List.copyOf(criterionScores);
             policyViolations = policyViolations == null ? List.of() : List.copyOf(policyViolations);
+            answerShape = answerShape == null ? "" : answerShape;
+            failureMode = failureMode == null ? "" : failureMode;
         }
     }
 }

@@ -64,9 +64,26 @@ final class EvaluationCases {
         List<ScoringCriterion> scoringCriteria,
         double maxScore,
         EvidencePolicy evidencePolicy,
+        List<String> mustInclude,
+        List<String> mustNotInclude,
+        List<String> styleConstraints,
+        String answerShape,
+        String failureMode,
         int maxChars) {
         ExpectedBehavior {
             scoringCriteria = scoringCriteria == null ? List.of() : List.copyOf(scoringCriteria);
+            mustInclude = copy(mustInclude);
+            mustNotInclude = copy(mustNotInclude);
+            styleConstraints = copy(styleConstraints);
+            answerShape = safe(answerShape);
+            failureMode = safe(failureMode);
+        }
+
+        ExpectedBehavior(List<ScoringCriterion> scoringCriteria,
+                         double maxScore,
+                         EvidencePolicy evidencePolicy,
+                         int maxChars) {
+            this(scoringCriteria, maxScore, evidencePolicy, List.of(), List.of(), List.of(), "", "", maxChars);
         }
     }
 

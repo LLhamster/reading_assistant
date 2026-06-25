@@ -16,6 +16,11 @@ final class EvaluationDatasetValidator {
     private static final Set<String> DIFFICULTIES = Set.of("EASY", "MEDIUM", "HARD");
     private static final Set<String> SOURCES = Set.of("golden", "synthetic", "sessiondb");
     private static final Set<String> SPLITS = Set.of(EvaluationCases.DEV, EvaluationCases.HOLDOUT);
+    private static final Set<String> REAL_CASE_REQUIRED = Set.of(
+        "人物", "具体时间", "事件背景", "处理过程", "结果", "和用户问题的对应关系");
+    private static final Set<String> INSUFFICIENT_EVIDENCE_REQUIRED = Set.of(
+        "说明证据不足", "说明现有证据只能支持什么");
+    private static final Set<String> COMPLETE_STORY_REQUIRED = Set.of("背景", "过程", "结果");
     private static final Pattern SECRET = Pattern.compile(
         "(?i)(sk-[a-z0-9_-]{16,}|bearer\\s+[a-z0-9._-]{16,}|api[_-]?key\\s*[:=]\\s*[^,\\s]{12,})");
     private static final Pattern EMAIL = Pattern.compile("[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}", Pattern.CASE_INSENSITIVE);
@@ -84,7 +89,36 @@ final class EvaluationDatasetValidator {
         double scoreSum = expected.scoringCriteria().stream().mapToDouble(EvaluationCases.ScoringCriterion::score).sum();
         require(Math.abs(scoreSum - expected.maxScore()) < 0.0001, id, "max_score does not match criteria", failures);
         require(expected.evidencePolicy() != null, id, "evidence_policy is missing", failures);
+        require(expected.mustInclude() != null, id, "must_include is null", failures);
+        require(expected.mustNotInclude() != null, id, "must_not_include is null", failures);
+        require(expected.styleConstraints() != null, id, "style_constraints is null", failures);
         require(expected.maxChars() > 0, id, "max_chars must be positive", failures);
+        validateCategorySpecificBehavior(example, failures);
+    }
+
+    private void validateCategorySpecificBehavior(EvaluationCases.EvaluationExample example, List<String> failures) {
+        EvaluationCases.ExpectedBehavior expected = example.expectedBehavior();
+        String category = example.category();
+        if ("REAL_CASE_REQUEST".equals(category)) {
+            require(containsAll(expected.mustInclude(), REAL_CASE_REQUIRED), example.id(),
+                "REAL_CASE_REQUEST must_include misses required story case fields", failures);
+        }
+        if ("STYLE_CONTROL".equals(category)) {
+            require(!expected.styleConstraints().isEmpty() || !expected.mustNotInclude().isEmpty(), example.id(),
+                "STYLE_CONTROL requires style_constraints or must_not_include", failures);
+        }
+        if ("INSUFFICIENT_EVIDENCE".equals(category)) {
+            require(containsAll(expected.mustInclude(), INSUFFICIENT_EVIDENCE_REQUIRED), example.id(),
+                "INSUFFICIENT_EVIDENCE must_include must require evidence insufficiency explanation", failures);
+        }
+        if ("COMPLETE_STORY_REQUEST".equals(category)) {
+            require(containsAll(expected.mustInclude(), COMPLETE_STORY_REQUIRED), example.id(),
+                "COMPLETE_STORY_REQUEST must_include misses background/process/result", failures);
+        }
+    }
+
+    private boolean containsAll(List<String> actual, Set<String> required) {
+        return required.stream().allMatch(requiredItem -> actual.stream().anyMatch(value -> value.contains(requiredItem)));
     }
 
     private void detectSensitiveContent(EvaluationCases.EvaluationExample example, String id, List<String> failures) {

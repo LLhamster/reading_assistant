@@ -46,14 +46,14 @@ class ReadingEvaluationLiveTest {
         ModelClient model = liveModelClient();
         List<EvaluationCases.EvaluationExample> cases = load("evaluation/multi-turn-reading-qa.jsonl");
         EvaluationReplayRunner runner = new EvaluationReplayRunner(objectMapper);
-        EvaluationJudge judge = new LlmEvaluationJudge(model, objectMapper);
+        EvaluationJudge judge = answerJudge(model);
         EvaluationReport report = runner.run(cases, EvaluationCases.MULTI_TURN_QA, split,
             "FINAL_ANSWER_COMPONENT_REPLAY", "moonshot-v1-8k", mode(), evaluationLimit(),
             example -> predictAnswer(model, example), judge);
         write(report);
-        System.out.printf("%n[MULTI_TURN_READING_EVALUATION]%nsplit=%s%ntotal=%d%nscore=%.4f%npassed=%d%nfailed=%d%npassRate=%.4f%n",
+        System.out.printf("%n[MULTI_TURN_READING_EVALUATION]%nsplit=%s%ntotal=%d%nscore=%.4f%npassed=%d%nfailed=%d%nunscored=%d%npassRate=%.4f%n",
             split, report.evaluated(), report.score(), report.passed(), report.evaluated() - report.passed(),
-            rate(report.passed(), report.evaluated()));
+            report.unscored(), rate(report.passed(), report.evaluated()));
         double threshold = Double.parseDouble(System.getProperty("evaluation.answer.minScore", "0.75"));
         enforceThresholdIfRequested(report, threshold, "answer");
     }
@@ -133,6 +133,14 @@ class ReadingEvaluationLiveTest {
 
     private EvaluationJudge deterministicJudge() {
         return (example, prediction, rules, mode) -> EvaluationMetrics.JudgeScore.unscored("not used for routing");
+    }
+
+    private EvaluationJudge answerJudge(ModelClient model) {
+        if (!Boolean.parseBoolean(System.getProperty("evaluation.judge", "true"))) {
+            return (example, prediction, rules, mode) ->
+                EvaluationMetrics.JudgeScore.unscored("judge disabled by -Devaluation.judge=false; answer-only replay");
+        }
+        return new LlmEvaluationJudge(model, objectMapper);
     }
 
     private void write(EvaluationReport report) throws IOException {

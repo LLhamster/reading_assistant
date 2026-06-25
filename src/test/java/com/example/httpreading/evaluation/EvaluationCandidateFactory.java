@@ -79,9 +79,12 @@ final class EvaluationCandidateFactory {
     private EvaluationCases.EvaluationExample forceCandidate(EvaluationCases.EvaluationExample candidate,
                                                                String source,
                                                                Map<String, Object> provenance) {
+        Map<String, Object> merged = new java.util.LinkedHashMap<>(provenance);
+        merged.put("generator", "synthetic-final-answer-boundary-v1");
+        merged.put("reviewed", false);
         return new EvaluationCases.EvaluationExample(candidate.id(), candidate.suite(), candidate.taskInput(),
             candidate.expectedResult(), candidate.expectedBehavior(), candidate.difficulty(), candidate.category(), source,
-            EvaluationCases.DEV, provenance);
+            EvaluationCases.DEV, Map.copyOf(merged));
     }
 
     private EvaluationCases.EvaluationExample parse(String raw) {
@@ -104,7 +107,13 @@ final class EvaluationCandidateFactory {
             TOOL_ROUTING 使用固定 expected_result；MULTI_TURN_QA 使用 task_input + expected_behavior。
             多轮问答的 task_input 必须包含预先汇总的 collected_evidence 和 mcp_results；
             expected_behavior 必须按本题实际要求生成独立 scoring_criteria，每项单独计分；
+            若 suite=MULTI_TURN_QA，expected_behavior 还必须包含 must_include、must_not_include、
+            style_constraints、answer_shape、failure_mode、max_chars；没有约束时用空数组或空字符串。
             只有问题确实要求原因、对比、过程或例子时才添加对应评分项，不能提供参考答案。
+            可使用的新增类别包括 INSUFFICIENT_EVIDENCE、REAL_CASE_REQUEST、COMPLETE_STORY_REQUEST、
+            STYLE_CONTROL、SOURCE_AWARE_ANSWER、RAG_EMPTY_RESULT、RAG_IRRELEVANT_RESULT、
+            CONFLICTING_EVIDENCE、TOOL_FAILURE_FALLBACK、MEMORY_OR_PROFILE_FOLLOW_UP。
+            provenance 必须包含 "generator":"synthetic-final-answer-boundary-v1","reviewed":false。
             source 必须是 synthetic，split 必须是 dev。
             suite=%s，候选序号=%d。
             能力说明：%s
@@ -116,7 +125,10 @@ final class EvaluationCandidateFactory {
             从下面已经脱敏的真实阅读会话中提取 1 条有代表性的评测候选。只输出统一 EvaluationExample JSON。
             忽略无效闲聊，不恢复任何被脱敏的信息。source=sessiondb，split=dev。
             expected_behavior 应生成逐项计分的 scoring_criteria，不要生成参考答案；
+            expected_behavior 还必须包含 must_include、must_not_include、style_constraints、
+            answer_shape、failure_mode、max_chars；没有约束时用空数组或空字符串。
             评分项应来自该会话的真实问题，不能机械要求每题都解释原因或举例。
+            provenance.reviewed=false。
             会话：%s
             """.formatted(session.toString());
     }
