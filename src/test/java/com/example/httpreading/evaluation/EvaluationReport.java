@@ -36,10 +36,14 @@ record EvaluationReport(
     }
 
     record CaseResult(String id, String category, double score, boolean passed, boolean hardPass,
-                      boolean scored, String feedback, List<String> failures) {
+                      boolean scored, String agentOutput, String feedback,
+                      List<EvaluationMetrics.CriterionScore> criterionScores,
+                      List<String> policyViolations) {
         CaseResult {
+            agentOutput = agentOutput == null ? "" : agentOutput;
             feedback = feedback == null ? "" : feedback;
-            failures = failures == null ? List.of() : List.copyOf(failures);
+            criterionScores = criterionScores == null ? List.of() : List.copyOf(criterionScores);
+            policyViolations = policyViolations == null ? List.of() : List.copyOf(policyViolations);
         }
     }
 }

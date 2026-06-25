@@ -48,7 +48,8 @@ final class EvaluationReplayRunner {
                          AgentAdapter adapter,
                          EvaluationJudge judge) {
         List<EvaluationCases.EvaluationExample> selected = all.stream()
-            .filter(example -> suite.equals(example.suite()) && split.equals(example.split()))
+            .filter(example -> suite.equals(example.suite())
+                && (EvaluationCases.ALL.equals(split) || split.equals(example.split())))
             .limit(Math.max(1, limit)).toList();
         List<EvaluationReport.CaseResult> results = new ArrayList<>();
         Aggregate aggregate = new Aggregate();
@@ -62,7 +63,7 @@ final class EvaluationReplayRunner {
                 }
             } catch (Exception exception) {
                 results.add(new EvaluationReport.CaseResult(example.id(), example.category(), 0.0,
-                    false, false, true, "execution failed", List.of(exception.getMessage())));
+                    false, false, true, "", "execution failed: " + exception.getMessage(), List.of(), List.of()));
                 aggregate.addFailure();
             }
         }
@@ -85,7 +86,7 @@ final class EvaluationReplayRunner {
             example.expectedResult(), result.route());
         boolean passed = score.overall() >= 0.75;
         results.add(new EvaluationReport.CaseResult(example.id(), example.category(), score.overall(),
-            passed, true, true, passed ? "" : "routing result mismatch", List.of()));
+            passed, true, true, "", passed ? "" : "routing result mismatch", List.of(), List.of()));
         aggregate.addRoute(score, result.trace());
     }
 
@@ -99,7 +100,8 @@ final class EvaluationReplayRunner {
         boolean hardPass = rules.outputNonBlank() && judged.policyViolations().isEmpty();
         boolean passed = score.overall() >= 0.75 && hardPass && judged.scored();
         results.add(new EvaluationReport.CaseResult(example.id(), example.category(), score.overall(), passed,
-            hardPass, judged.scored(), judged.feedback(), judged.policyViolations()));
+            hardPass, judged.scored(), result.answer(), judged.feedback(),
+            judged.criterionScores(), judged.policyViolations()));
         aggregate.addAnswer(score, result.trace());
     }
 

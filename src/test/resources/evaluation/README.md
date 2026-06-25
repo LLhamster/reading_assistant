@@ -91,6 +91,8 @@ answer_score = criterion_score - length_penalty
 
 每套数据固定为 35 条 dev 和 15 条 holdout。Synthetic 和 SessionDB 候选只能进入 dev；正式测试运行时不会临时生成题目。
 
+如需一次跑完整 50 条，可以显式使用 `-Devaluation.split=all`。这不会修改样本里的固定拆分，只是在本次运行中同时选取 dev 和 holdout。
+
 ## 离线校验
 
 ```bash
@@ -105,6 +107,12 @@ MODEL_API_KEY=... mvn -Dtest=ReadingEvaluationLiveTest \
 
 MODEL_API_KEY=... mvn -Dtest=ReadingEvaluationLiveTest \
   -Devaluation.live.answer=true -Devaluation.mode=FAST test
+
+MODEL_API_KEY=... mvn -Dtest=ReadingEvaluationLiveTest \
+  -Devaluation.live.answer=true \
+  -Devaluation.split=all \
+  -Devaluation.limit=50 \
+  -Devaluation.mode=FAST test
 ```
 
 `STRICT` 会执行三次 LLM Judge 并取各维度中位数。holdout 必须同时设置：
@@ -114,6 +122,12 @@ MODEL_API_KEY=... mvn -Dtest=ReadingEvaluationLiveTest \
 ```
 
 报告写入 `target/evaluation/<run-id>/report.json` 和 `report.md`。
+
+低分和未通过样本默认只写入报告，不会导致 Maven 失败。报告包含 Agent 原始回答、每个 criterion 的得分与 Judge 理由、综合反馈和 evidence policy 违规信息。若需要在 CI 中把低于阈值视为测试失败，显式添加：
+
+```bash
+-Devaluation.failOnThreshold=true
+```
 
 ## 候选数据制作
 

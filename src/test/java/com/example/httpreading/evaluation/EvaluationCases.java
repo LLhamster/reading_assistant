@@ -8,6 +8,7 @@ final class EvaluationCases {
     static final String MULTI_TURN_QA = "MULTI_TURN_QA";
     static final String DEV = "dev";
     static final String HOLDOUT = "holdout";
+    static final String ALL = "all";
 
     private EvaluationCases() {
     }

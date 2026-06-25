@@ -80,6 +80,26 @@ class EvaluationFrameworkTest {
     }
 
     @Test
+    void replayRunnerCanSelectAllSplitsForExplicitFullRun() {
+        List<EvaluationCases.EvaluationExample> examples = List.of(
+            example("dev-case", "golden", EvaluationCases.DEV, "hello"),
+            example("holdout-case", "golden", EvaluationCases.HOLDOUT, "hello"));
+        EvaluationReplayRunner runner = new EvaluationReplayRunner(objectMapper);
+        EvaluationReplayRunner.AgentAdapter adapter = evaluationCase -> new EvaluationReplayRunner.AgentResult(
+            new EvaluationMetrics.RoutingPrediction("NO_TOOL", "", List.of()), "",
+            EvaluationMetrics.ExecutionTrace.empty());
+        EvaluationJudge judge = (evaluationCase, prediction, rules, mode) ->
+            EvaluationMetrics.JudgeScore.unscored("not used for routing");
+
+        EvaluationReport report = runner.run(examples, EvaluationCases.TOOL_ROUTING, EvaluationCases.ALL,
+            "COMPONENT", "fixture", EvaluationJudge.Mode.FAST, adapter, judge);
+
+        assertEquals(2, report.evaluated());
+        assertEquals(1, report.numDev());
+        assertEquals(1, report.numHoldout());
+    }
+
+    @Test
     void fastAndStrictJudgeUseOneAndThreePasses() {
         ModelClient fastModel = mock(ModelClient.class);
         when(fastModel.chat(anyString())).thenReturn(judgeJson(0.8));

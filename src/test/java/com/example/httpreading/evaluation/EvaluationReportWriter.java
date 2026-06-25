@@ -31,14 +31,22 @@ final class EvaluationReportWriter {
             .append("- target: ").append(report.target()).append('\n')
             .append("- split: ").append(report.split()).append('\n')
             .append("- score: ").append(format(report.score())).append('\n')
-            .append("- pass rate: ").append(format(rate(report.passed(), report.evaluated()))).append('\n')
-            .append("- exact match: ").append(format(report.exactMatch())).append('\n')
-            .append("- tool F1: ").append(format(report.toolF1())).append('\n')
-            .append("- evidence recall: ").append(format(report.evidenceRecall())).append("\n\n")
-            .append("## Failed cases\n\n");
+            .append("- passed: ").append(report.passed()).append('/').append(report.evaluated()).append('\n')
+            .append("- pass rate: ").append(format(rate(report.passed(), report.evaluated()))).append('\n');
+        if (EvaluationCases.TOOL_ROUTING.equals(report.suite())) {
+            text.append("- exact match: ").append(format(report.exactMatch())).append('\n')
+                .append("- tool F1: ").append(format(report.toolF1())).append('\n');
+        }
+        text.append("\n## Failed cases\n\n");
         report.cases().stream().filter(result -> !result.passed()).forEach(result -> text
-            .append("- ").append(result.id()).append(": ").append(result.feedback())
-            .append(result.failures().isEmpty() ? "" : " " + result.failures()).append('\n'));
+            .append("### ").append(result.id()).append(" — ").append(format(result.score())).append("\n\n")
+            .append("Agent output: ").append(result.agentOutput()).append("\n\n")
+            .append("Feedback: ").append(result.feedback()).append("\n\n")
+            .append(result.criterionScores().stream().map(score -> "- `" + score.id() + "`: "
+                + format(score.score()) + "/" + format(score.maxScore()) + " — " + score.reason())
+                .collect(java.util.stream.Collectors.joining("\n")))
+            .append(result.policyViolations().isEmpty() ? "" : "\n\nPolicy violations: " + result.policyViolations())
+            .append("\n\n"));
         return text.toString();
     }
 
