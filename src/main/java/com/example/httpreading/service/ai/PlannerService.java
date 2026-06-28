@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.example.httpreading.dto.AiChatRequest;
+import com.example.httpreading.evolution.PromptOverride;
 import com.example.httpreading.mcp.ExternalMcpClientService;
 import com.example.httpreading.service.ModelClient;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -36,10 +37,15 @@ public class PlannerService {
     }
 
     public ChatPlan plan(AiChatRequest request) {
+        return plan(request, PromptOverride.none());
+    }
+
+    public ChatPlan plan(AiChatRequest request, PromptOverride promptOverride) {
         AiChatRequest safeRequest = request == null ? new AiChatRequest() : request;
         String question = normalize(safeRequest.getQuestion());
         try {
-            String prompt = promptBuilder.build(safeRequest);
+            PromptOverride override = promptOverride == null ? PromptOverride.none() : promptOverride;
+            String prompt = promptBuilder.build(safeRequest, override.plannerPatch());
             logPrompt("PLANNER", prompt);
             String raw = modelClient.chat(prompt);
             LlmPlanResponse response = parse(raw);

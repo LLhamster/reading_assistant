@@ -80,12 +80,15 @@ public class AgentMemoryService {
             metadata.put("sourceCount", sourceCount);
         }
         metadata.put("summary", true);
+        metadata.put("raw_user_question", truncate(question, WORKING_QUESTION_CHARS));
 
         MemorySummary summary = summarizeTurn(bookId, chapterIndex, question, answer);
 
         manager.addMemory("用户提问：" + truncate(summary.question(), WORKING_QUESTION_CHARS), metadata, "working", 0.5f);
         manager.addMemory("助手回答：" + truncate(summary.conclusion(), WORKING_ANSWER_CHARS), metadata, "working", 0.6f);
-        manager.addMemory(episodicSummary(bookId, chapterIndex, summary.question(), summary.conclusion()), metadata, "episodic", 0.7f);
+        manager.addMemory(
+            episodicSummary(bookId, chapterIndex, summary.question(), summary.conclusion(), question),
+            metadata, "episodic", 0.7f);
     }
 
     public void rememberWorkingTurn(String userId,
@@ -118,9 +121,10 @@ public class AgentMemoryService {
             return;
         }
         Map<String, Object> metadata = memoryMetadata(sessionId, bookId, chapterIndex, sourceCount);
+        metadata.put("raw_user_question", truncate(question, WORKING_QUESTION_CHARS));
         MemorySummary summary = summarizeTurn(bookId, chapterIndex, question, answer);
         manager.addMemory(
-            episodicSummary(bookId, chapterIndex, summary.question(), summary.conclusion()),
+            episodicSummary(bookId, chapterIndex, summary.question(), summary.conclusion(), question),
             metadata,
             "episodic",
             Math.max(0.0f, Math.min(1.0f, importance)));
@@ -175,9 +179,14 @@ public class AgentMemoryService {
         return metadata;
     }
 
-    private String episodicSummary(Long bookId, Integer chapterIndex, String question, String answer) {
+    private String episodicSummary(Long bookId,
+                                   Integer chapterIndex,
+                                   String question,
+                                   String answer,
+                                   String rawQuestion) {
         return "阅读问答摘要：\n"
             + "问题：" + truncate(question, EPISODIC_QUESTION_CHARS) + "\n"
+            + "用户原始提问：" + truncate(rawQuestion, WORKING_QUESTION_CHARS) + "\n"
             + "结论：" + truncate(answer, EPISODIC_ANSWER_CHARS) + "\n"
             + "位置：bookId=" + bookId + ", chapterIndex=" + chapterIndex;
     }

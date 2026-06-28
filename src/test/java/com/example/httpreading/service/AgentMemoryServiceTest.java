@@ -51,6 +51,7 @@ class AgentMemoryServiceTest {
 
         String episodic = contentCaptor.getAllValues().get(2);
         assertTrue(episodic.startsWith("阅读问答摘要"));
+        assertTrue(episodic.contains("用户原始提问：这是一个很长的问题"));
         assertTrue(episodic.contains("位置：bookId=7, chapterIndex=2"));
         assertTrue(episodic.length() < 520);
 
@@ -60,6 +61,7 @@ class AgentMemoryServiceTest {
         assertEquals(2, metadata.get("chapterIndex"));
         assertEquals(3, metadata.get("sourceCount"));
         assertEquals(true, metadata.get("summary"));
+        assertTrue(String.valueOf(metadata.get("raw_user_question")).contains("这是一个很长的问题"));
     }
 
     @Test

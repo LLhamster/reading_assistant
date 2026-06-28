@@ -56,6 +56,44 @@
 
 以下命令均在 `java_src` 项目根目录执行。
 
+### Self-Evolution 本地实验
+
+Self-Evolution 默认不运行。它只读取指定用户的 episodic memory，生成固定 30 个用例，
+分别运行 baseline 和一个候选 FinalAnswer Prompt，并将报告写入 `target/evolution`。实验调用不会写入用户记忆，
+也不会修改 production Prompt。生成用例采用与 `multi-turn-reading-qa.jsonl` 相同的多轮结构，
+包含 dialogue、collected_evidence、mcp_results、scoring_criteria 和 evidence_policy。
+回答评估采用相同的 Hybrid Judge：确定性空值/长度检查加 LLM 逐项评分和证据边界检查。
+Self-Evolution 用例不使用 must_include、must_not_include 或 style_constraints；所有理想回答要求
+都作为正向 scoring_criteria 独立计分。
+内容评分与证据审查相互独立：Scoring Judge 只按 scoring_criteria 加分，Evidence Boundary Judge
+逐项检查具体事实、来源归因和假设标注。证据违规会成为硬失败；任一 Judge 调用或解析失败会令
+整轮实验无效，不能推荐候选 Prompt。
+
+FinalAnswer Prompt 使用 `EvolvablePromptTemplate` 分为两层：角色、输入输出格式、证据与安全边界属于
+固定契约；表达顺序、详略、例子和叙事方式属于可进化策略。候选只追加到可进化策略区，
+不会生成 Planner patch，也不能替换固定契约。这个分层与候选生成协议不依赖阅读业务字段，
+可作为其他 Agent 的通用 Prompt 进化组件；当前阅读系统只是它的一个接入适配器。
+实验执行时直接将用例中的 `final_answer_input` 和固定 evidence 传给 `FinalAnswerService`，
+不运行 Planner、MCP、RAG 或记忆检索；baseline 和 candidate 的唯一差异是候选 patch。
+
+```bash
+MODEL_API_KEY=xxx mvn \
+  -Dtest=SelfEvolutionLiveTest \
+  -DselfEvolution.live=true \
+  -DselfEvolution.userId=default_user \
+  -DselfEvolution.caseCount=5 \
+  test
+```
+
+可选参数包括 `selfEvolution.memoryLimit`、`selfEvolution.defaultBookId`、
+`selfEvolution.defaultChapterIndex`、`selfEvolution.caseCount`（默认 30，范围 1–100）
+和 `selfEvolution.reportDir`。输出目录包含 `report.json`、
+`report.md` 和可逐行检查的 `eval-cases.jsonl`。一次完整实验除 FinalAnswer 调用外还会为
+baseline/candidate 的每个回答调用 Judge 模型。
+当前每个回答会调用一次 Scoring Judge 和一次 Evidence Boundary Judge。
+如果 baseline 全部通过且没有硬失败，实验会提前结束，不生成候选 FinalAnswer patch，也不会运行 candidate
+和第二轮 Judge。模型全部执行失败或无法生成有效 patch 时也会提前结束，不重复运行等价 candidate。
+
 ### 默认 mock 回归测试
 
 统一运行：
@@ -129,4 +167,3 @@ failed=0
 - `reason`：失败原因。
 - `expected`：期望值。
 - `actual`：实际值。
-

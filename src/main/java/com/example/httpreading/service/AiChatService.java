@@ -6,9 +6,11 @@ import com.example.httpreading.context.manager.ContextManager;
 import com.example.httpreading.context.model.Context;
 import com.example.httpreading.dto.AiChatRequest;
 import com.example.httpreading.dto.AiChatResponse;
+import com.example.httpreading.evolution.EvolutionExecutionOptions;
 import com.example.httpreading.mcp.ExternalMcpAgentService;
 import com.example.httpreading.service.RagService.RagAnswer;
 import com.example.httpreading.service.ai.ChatPlan;
+import com.example.httpreading.service.ai.AiChatExecutionResult;
 import com.example.httpreading.service.ai.CollectedEvidence;
 import com.example.httpreading.service.ai.EvidenceAggregator;
 import com.example.httpreading.service.ai.FinalAnswerService;
@@ -52,24 +54,37 @@ public class AiChatService {
     }
 
     public AiChatResponse chat(AiChatRequest request) {
+        return execute(request, EvolutionExecutionOptions.production()).response();
+    }
+
+    public AiChatExecutionResult execute(AiChatRequest request, EvolutionExecutionOptions executionOptions) {
+        EvolutionExecutionOptions options = executionOptions == null
+            ? EvolutionExecutionOptions.production()
+            : executionOptions;
         String userId = request.resolvedUserId();
         String sessionId = request.resolvedSessionId();
         Context context = contextManager.getOrCreateContext(userId, sessionId);
         Integer contextId = context.getContextId();
 
-        contextManager.putVariable(contextId, "bookId", request.getBookId(), "request", 0.9d);
-        contextManager.putVariable(contextId, "chapterIndex", request.getChapterIndex(), "request", 0.8d);
-        contextManager.putVariable(contextId, "lastQuestion", request.getQuestion(), "user", 1.0d);
+        if (!options.evalMode()) {
+            contextManager.putVariable(contextId, "bookId", request.getBookId(), "request", 0.9d);
+            contextManager.putVariable(contextId, "chapterIndex", request.getChapterIndex(), "request", 0.8d);
+            contextManager.putVariable(contextId, "lastQuestion", request.getQuestion(), "user", 1.0d);
+        }
 
-        ChatPlan plan = plannerService.plan(request);
+        ChatPlan plan = options.evalMode()
+            ? plannerService.plan(request, options.promptOverride())
+            : plannerService.plan(request);
         ToolExecutionResult toolExecution = request.hasConfirmationId()
             ? mcpToolOrchestrator.resume(request, plan)
-            : executeFreshPlan(request, plan);
+            : executeFreshPlan(request, plan, options);
 
         if (toolExecution.needsConfirmation()) {
-            contextManager.appendSnapshot(contextId, userId, "user", request.getQuestion(), requestMetadata(request));
-            contextManager.appendSnapshot(contextId, userId, "assistant", toolExecution.guidance(), Map.of(
-                "type", "mcp_confirmation"));
+            if (!options.evalMode()) {
+                contextManager.appendSnapshot(contextId, userId, "user", request.getQuestion(), requestMetadata(request));
+                contextManager.appendSnapshot(contextId, userId, "assistant", toolExecution.guidance(), Map.of(
+                    "type", "mcp_confirmation"));
+            }
             AiChatResponse response = new AiChatResponse(toolExecution.guidance(), java.util.List.of());
             response.setStatus("needs_confirmation");
             response.setInteraction(toolExecution.interaction());
@@ -80,22 +95,26 @@ public class AiChatService {
                 .map(com.example.httpreading.mcp.ExternalMcpCallResult::ref)
                 .toList());
             response.setExternalMcpPlanRefs(toolExecution.planRefs());
-            return response;
+            return new AiChatExecutionResult(response, plan);
         }
 
         CollectedEvidence evidence = evidenceAggregator.aggregate(request, plan, toolExecution);
         String answer;
         try {
-            answer = finalAnswerService.answer(request, plan, evidence);
+            answer = options.evalMode()
+                ? finalAnswerService.answer(request, plan, evidence, options.promptOverride())
+                : finalAnswerService.answer(request, plan, evidence);
         } catch (ModelClientException exception) {
             logger.warn("最终回答模型调用失败，返回 model_unavailable。statusCode={}, retryable={}, evidenceCount={}",
                 exception.statusCode(), exception.retryable(), evidence.items().size());
-            contextManager.appendSnapshot(contextId, userId, "user", request.getQuestion(), requestMetadata(request));
             String unavailableAnswer = modelUnavailableAnswer(exception, evidence);
-            contextManager.appendSnapshot(contextId, userId, "assistant", unavailableAnswer, Map.of(
-                "type", "model_unavailable",
-                "sourceCount", evidence.sources().size(),
-                "planMode", plan.executionMode().name()));
+            if (!options.evalMode()) {
+                contextManager.appendSnapshot(contextId, userId, "user", request.getQuestion(), requestMetadata(request));
+                contextManager.appendSnapshot(contextId, userId, "assistant", unavailableAnswer, Map.of(
+                    "type", "model_unavailable",
+                    "sourceCount", evidence.sources().size(),
+                    "planMode", plan.executionMode().name()));
+            }
 
             AiChatResponse response = new AiChatResponse(unavailableAnswer, evidence.sources());
             response.setContextId(contextId);
@@ -104,17 +123,21 @@ public class AiChatService {
             response.setExternalMcpRefs(evidence.externalMcpRefs());
             response.setExternalMcpPlanRefs(evidence.externalMcpPlanRefs());
             response.setStatus("model_unavailable");
-            return response;
+            return new AiChatExecutionResult(response, plan);
         }
         logger.info("AI Plan-and-Execute answer generated. planMode={}, evidenceCount={}",
             plan.executionMode(), evidence.items().size());
 
-        contextManager.appendSnapshot(contextId, userId, "user", request.getQuestion(), requestMetadata(request));
-        contextManager.appendSnapshot(contextId, userId, "assistant", answer, Map.of(
-            "sourceCount", evidence.sources().size(),
-            "memoryCount", evidence.memoryRefs().size(),
-            "planMode", plan.executionMode().name()));
-        memoryWriter.write(request, plan, evidence, answer);
+        if (!options.evalMode()) {
+            contextManager.appendSnapshot(contextId, userId, "user", request.getQuestion(), requestMetadata(request));
+            contextManager.appendSnapshot(contextId, userId, "assistant", answer, Map.of(
+                "sourceCount", evidence.sources().size(),
+                "memoryCount", evidence.memoryRefs().size(),
+                "planMode", plan.executionMode().name()));
+        }
+        if (!options.disableMemoryWrite()) {
+            memoryWriter.write(request, plan, evidence, answer);
+        }
 
         AiChatResponse response = new AiChatResponse(answer, evidence.sources());
         response.setContextId(contextId);
@@ -123,15 +146,19 @@ public class AiChatService {
         response.setExternalMcpRefs(evidence.externalMcpRefs());
         response.setExternalMcpPlanRefs(evidence.externalMcpPlanRefs());
         response.setStatus("completed");
-        return response;
+        return new AiChatExecutionResult(response, plan);
     }
 
     public RagAnswer getAnswer(Long bookId, Integer chapterIndex, String question) {
         return ragService.answer(bookId, chapterIndex, question, 3, null);
     }
 
-    private ToolExecutionResult executeFreshPlan(AiChatRequest request, ChatPlan plan) {
-        externalMcpAgentService.cancelPending(request);
+    private ToolExecutionResult executeFreshPlan(AiChatRequest request,
+                                                 ChatPlan plan,
+                                                 EvolutionExecutionOptions options) {
+        if (!options.evalMode()) {
+            externalMcpAgentService.cancelPending(request);
+        }
         return mcpToolOrchestrator.execute(request, plan);
     }
 

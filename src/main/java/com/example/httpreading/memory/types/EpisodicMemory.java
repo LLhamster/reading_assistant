@@ -210,7 +210,7 @@ public class EpisodicMemory extends BaseMemory {
             ? LocalDateTime.now().atZone(java.time.ZoneId.systemDefault()).toEpochSecond()
             : memoryItem.getTimestamp().atZone(java.time.ZoneId.systemDefault()).toEpochSecond();
 
-        Map<String, Object> properties = new HashMap<>();
+        Map<String, Object> properties = new HashMap<>(metadata);
         properties.put("session_id", sessionId);
         properties.put("context", context);
         properties.put("outcome", outcome);

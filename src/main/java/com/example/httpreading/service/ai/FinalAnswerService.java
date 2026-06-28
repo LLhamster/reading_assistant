@@ -1,6 +1,8 @@
 package com.example.httpreading.service.ai;
 
 import com.example.httpreading.dto.AiChatRequest;
+import com.example.httpreading.evolution.EvolvablePromptTemplate;
+import com.example.httpreading.evolution.PromptOverride;
 import com.example.httpreading.service.ModelClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,7 +19,15 @@ public class FinalAnswerService {
     }
 
     public String answer(AiChatRequest request, ChatPlan plan, CollectedEvidence evidence) {
-        String prompt = buildPrompt(request, plan, evidence);
+        return answer(request, plan, evidence, PromptOverride.none());
+    }
+
+    public String answer(AiChatRequest request,
+                         ChatPlan plan,
+                         CollectedEvidence evidence,
+                         PromptOverride promptOverride) {
+        PromptOverride override = promptOverride == null ? PromptOverride.none() : promptOverride;
+        String prompt = buildPrompt(request, plan, evidence, override.finalAnswerPatch());
         logPrompt("FINAL_ANSWER", prompt);
         String answer = modelClient.chat(prompt);
         String issue = qualityIssue(plan, evidence, answer);
@@ -38,11 +48,18 @@ public class FinalAnswerService {
     }
 
     String buildPrompt(AiChatRequest request, ChatPlan plan, CollectedEvidence evidence) {
+        return buildPrompt(request, plan, evidence, "");
+    }
+
+    String buildPrompt(AiChatRequest request,
+                       ChatPlan plan,
+                       CollectedEvidence evidence,
+                       String candidatePatch) {
         String evidenceText = evidence == null || evidence.formattedEvidence().isBlank()
             ? "没有收集到足够证据。"
             : evidence.formattedEvidence();
         String guidance = plan == null ? "" : plan.answerGuidance();
-        return """
+        String fixedContract = """
             你是这个阅读系统中的 AI 助手。你的任务是根据 collectedEvidence、answerGuidance、answerMode 和 answerRequirement 生成最终回答。
             
             一、硬边界
@@ -66,12 +83,9 @@ public class FinalAnswerService {
             - MEDIUM：优先依据证据；可做有限常识补充，但要标明补充性质。
             - LOOSE：可以更自由地辅助理解，但不能伪造来源。
 
-            四、回答策略
-            - 直接回答问题，不要模板化开头，例如“简单说”“总的来说”。
-            - 表达要像给普通读者解释；普通阅读追问控制在 4-6 段，每段短一些。
-            - 追问时只回答新增点，不重复上一轮解释。
-            - 如果有补充解释，明确区分“当前资料支持什么”和“补充理解是什么”。
-            - subIntent=CONTRASTIVE_WHY 时，重点回答“为什么仍然选择 B”：更大问题、优先目标、权衡取舍和代价。
+            四、固定输出契约
+            - 只输出面向用户的最终回答，不输出规划、工具调用或内部检查过程。
+            - 回答必须围绕 originalQuestion，并遵守下面的运行时输入和证据边界。
             - 最后列出关键来源；没有证据时写“关键来源：当前未收集到足够证据；以上为一般知识辅助理解”。
 
             五、answerRequirement
@@ -110,6 +124,15 @@ public class FinalAnswerService {
             plan == null ? AnswerRequirement.normal() : plan.answerRequirement(),
             guidance,
             evidenceText);
+        String defaultPolicy = """
+            四、回答策略
+            - 直接回答问题，不要模板化开头，例如“简单说”“总的来说”。
+            - 表达要像给普通读者解释；普通阅读追问控制在 4-6 段，每段短一些。
+            - 追问时只回答新增点，不重复上一轮解释。
+            - 如果有补充解释，明确区分“当前资料支持什么”和“补充理解是什么”。
+            - subIntent=CONTRASTIVE_WHY 时，重点回答“为什么仍然选择 B”：更大问题、优先目标、权衡取舍和代价。
+            """;
+        return new EvolvablePromptTemplate(fixedContract, defaultPolicy).render(candidatePatch);
     }
 
     private String qualityIssue(ChatPlan plan, CollectedEvidence evidence, String answer) {

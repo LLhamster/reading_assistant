@@ -53,6 +53,20 @@ class PlannerPromptBuilderTest {
     }
 
     @Test
+    void experimentalPatchIsOnlyAddedByOverrideOverload() {
+        ExternalMcpClientService client = mock(ExternalMcpClientService.class);
+        when(client.routableServers()).thenReturn(List.of());
+        PlannerPromptBuilder builder = new PlannerPromptBuilder(client);
+
+        String production = builder.build(request());
+        String experiment = builder.build(request(), "必须识别具体例子意图");
+
+        assertFalse(production.contains("实验覆盖指令"));
+        assertTrue(experiment.contains("实验覆盖指令"));
+        assertTrue(experiment.contains("必须识别具体例子意图"));
+    }
+
+    @Test
     void promptListsExternalMcpServerWhitelistWhenEnabled() {
         ExternalMcpClientService externalMcpClientService = mock(ExternalMcpClientService.class);
         when(externalMcpClientService.routableServers()).thenReturn(List.of(

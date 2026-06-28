@@ -15,8 +15,12 @@ public class PlannerPromptBuilder {
     }
 
     public String build(AiChatRequest request) {
+        return build(request, "");
+    }
+
+    public String build(AiChatRequest request, String experimentalPatch) {
         String callableServers = mcpServersText(request.isExternalMcpEnabled());
-        return """
+        String basePrompt = """
             你是个人阅读成长 Agent 系统的 Planner。你的任务不是回答用户问题，而是生成工具执行计划。
             
             你只能输出 JSON：
@@ -212,7 +216,19 @@ public class PlannerPromptBuilder {
             request.isExternalMcpEnabled(),
             json(request.getQuestion()),
             callableServers);
+        return appendExperimentalPatch(basePrompt, experimentalPatch);
 
+    }
+
+    private String appendExperimentalPatch(String basePrompt, String patch) {
+        if (patch == null || patch.isBlank()) {
+            return basePrompt;
+        }
+        return basePrompt + """
+
+            实验覆盖指令（仅本次 Self-Evolution 评测生效）：
+            %s
+            """.formatted(patch.trim());
     }
 
     private String mcpServersText(boolean externalMcpEnabled) {

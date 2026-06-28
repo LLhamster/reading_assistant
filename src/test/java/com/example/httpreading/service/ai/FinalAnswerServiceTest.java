@@ -10,10 +10,24 @@ import static org.mockito.Mockito.when;
 import java.util.List;
 
 import com.example.httpreading.dto.AiChatRequest;
+import com.example.httpreading.evolution.PromptOverride;
 import com.example.httpreading.service.ModelClient;
 import org.junit.jupiter.api.Test;
 
 class FinalAnswerServiceTest {
+
+    @Test
+    void experimentalPatchIsScopedToOverrideCall() {
+        ModelClient modelClient = mock(ModelClient.class);
+        when(modelClient.chat(org.mockito.ArgumentMatchers.anyString())).thenReturn("合格回答");
+        FinalAnswerService service = new FinalAnswerService(modelClient);
+
+        service.answer(request(), plan(), evidence(), new PromptOverride("", "先给具体例子"));
+
+        verify(modelClient, org.mockito.Mockito.atLeastOnce()).chat(contains("[EVOLVABLE_PROMPT_POLICY_BEGIN]"));
+        verify(modelClient, org.mockito.Mockito.atLeastOnce()).chat(contains("候选策略（仅本次实验生效）"));
+        verify(modelClient, org.mockito.Mockito.atLeastOnce()).chat(contains("先给具体例子"));
+    }
 
     @Test
     void promptRequiresPlainNaturalReadingAnswerStyle() {
@@ -22,6 +36,8 @@ class FinalAnswerServiceTest {
         String prompt = service.buildPrompt(request(), plan(), evidence());
 
         assertTrue(prompt.contains("一、硬边界"));
+        assertTrue(prompt.contains("[FIXED_PROMPT_CONTRACT_BEGIN]"));
+        assertTrue(prompt.contains("[EVOLVABLE_PROMPT_POLICY_BEGIN]"));
         assertTrue(prompt.contains("二、answerMode"));
         assertTrue(prompt.contains("三、evidenceStrictness"));
         assertTrue(prompt.contains("四、回答策略"));

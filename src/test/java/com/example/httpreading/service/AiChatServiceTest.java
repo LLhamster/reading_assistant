@@ -12,6 +12,8 @@ import com.example.httpreading.context.manager.DefaultContextManager;
 import com.example.httpreading.dto.AiChatInteraction;
 import com.example.httpreading.dto.AiChatRequest;
 import com.example.httpreading.dto.AiChatResponse;
+import com.example.httpreading.evolution.EvolutionExecutionOptions;
+import com.example.httpreading.evolution.PromptOverride;
 import com.example.httpreading.mcp.ExternalMcpAgentService;
 import com.example.httpreading.mcp.ExternalMcpCallResult;
 import com.example.httpreading.service.ai.ChatPlan;
@@ -86,6 +88,26 @@ class AiChatServiceTest {
         assertEquals("completed", response.getStatus());
         verify(memoryWriter).write(request, plan, evidence, "最终回答");
         verify(externalMcpAgentService).cancelPending(request);
+    }
+
+    @Test
+    void evaluationExecutionUsesOverrideAndSkipsMemoryAndPendingStateWrites() {
+        AiChatRequest request = request();
+        ChatPlan plan = plan(ToolExecutionMode.MULTI_TOOL);
+        PromptOverride override = new PromptOverride("planner patch", "answer patch");
+        ToolExecutionResult execution = ToolExecutionResult.completed(List.of(), List.of("PLAN_MODE MULTI_TOOL"));
+        CollectedEvidence evidence = evidence();
+        when(plannerService.plan(request, override)).thenReturn(plan);
+        when(mcpToolOrchestrator.execute(request, plan)).thenReturn(execution);
+        when(evidenceAggregator.aggregate(request, plan, execution)).thenReturn(evidence);
+        when(finalAnswerService.answer(request, plan, evidence, override)).thenReturn("实验回答");
+
+        var result = aiChatService.execute(request, EvolutionExecutionOptions.evaluation(override));
+
+        assertEquals("实验回答", result.response().getAnswer());
+        assertEquals(plan, result.plan());
+        verify(memoryWriter, never()).write(any(), any(), any(), any());
+        verify(externalMcpAgentService, never()).cancelPending(any());
     }
 
     @Test
