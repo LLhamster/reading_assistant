@@ -53,4 +53,23 @@ class CandidatePromptGeneratorTest {
         assertTrue(patch.plannerPatch().isBlank());
         assertTrue(patch.finalAnswerPatch().contains("起因、变化和结果"));
     }
+
+    @Test
+    void rejectsRuleThatLabelsEveryConcreteTeachingExampleAsHypothetical() {
+        ModelClient modelClient = mock(ModelClient.class);
+        when(modelClient.chat(anyString())).thenReturn("""
+            {"finalAnswerPatch":"所有具体例子和每个数字都必须逐项标注为假设。"}
+            """);
+        CandidatePromptGenerator generator =
+            new CandidatePromptGenerator(modelClient, new ObjectMapper());
+        EvolutionCaseResult failed = new EvolutionCaseResult(
+            "c1", "证据边界失败", "completed", null, 0.4,
+            false, true, List.of(FailureType.EVIDENCE_BOUNDARY),
+            List.of("历史场景缺少前置限定"), 1);
+
+        PromptOverride patch = generator.generate(List.of(failed));
+
+        assertFalse(patch.finalAnswerPatch().contains("每个数字都必须逐项标注"));
+        assertTrue(patch.finalAnswerPatch().contains("教学例子无需声明真实性"));
+    }
 }

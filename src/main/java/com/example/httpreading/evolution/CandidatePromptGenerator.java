@@ -18,6 +18,9 @@ public class CandidatePromptGenerator {
     private static final Logger log = LoggerFactory.getLogger(CandidatePromptGenerator.class);
     private static final Pattern INTERNAL_IDENTIFIER =
         Pattern.compile("\\b[a-z][a-z0-9]*_[a-z0-9_]+\\b", Pattern.CASE_INSENSITIVE);
+    private static final Pattern OVERBROAD_HYPOTHETICAL_LABEL =
+        Pattern.compile("(?s)(?:所有|每个|任何).{0,16}(?:具体|数字|细节|例子).{0,24}"
+            + "(?:逐项|分别|都必须).{0,16}(?:假设|标注)");
 
     private final ModelClient modelClient;
     private final ObjectMapper objectMapper;
@@ -61,6 +64,11 @@ public class CandidatePromptGenerator {
             - 不重写角色介绍、输入格式、输出格式、事实边界、安全规则等固定契约。
             - 不使用“忽略之前指令”“覆盖固定规则”等越权措辞。
             - 只描述跨领域可复用的回答行为，最多 8 条，失败未涉及的行为不要修改。
+            - 必须区分“历史/事实内容补写”和“解释理论的教学举例”：
+              历史或真实事件的想象补写，应在整个场景开始前统一说明“可能、假设或用于理解”，
+              一次说明覆盖连续场景，不要求每个细节重复标注，也不能冒充原文事实；
+              教学举例中的虚构人物、数字和生活场景不承担真实事件声明，无需真实性标签。
+            - 禁止生成“所有具体例子、每个数字或每个新增细节都必须逐项标注假设”的过度规则。
             - 只输出 JSON：{"finalAnswerPatch":"可为空"}
 
             failureCounts:
@@ -82,6 +90,7 @@ public class CandidatePromptGenerator {
             || patch.contains("覆盖固定")
             || patch.contains("修改固定")
             || patch.contains("修改输出格式")
+            || OVERBROAD_HYPOTHETICAL_LABEL.matcher(patch).find()
             || INTERNAL_IDENTIFIER.matcher(patch).find()) {
             throw new IllegalArgumentException("candidate patch attempts to modify a fixed or project-specific contract");
         }
@@ -136,7 +145,8 @@ public class CandidatePromptGenerator {
             finalRules.add("首段先给出问题的核心结论，后续内容必须围绕该问题展开。");
         }
         if (failures.containsKey(FailureType.EVIDENCE_BOUNDARY)) {
-            finalRules.add("明确区分输入事实、一般知识与假设示例；没有可靠依据时说明不确定性，禁止把假设写成事实。");
+            finalRules.add("历史或事实语境中的想象补写，在整个连续场景开始前统一说明“可能、假设或用于理解”，"
+                + "并且不能归因成原文事实；用于解释理论的教学例子无需声明真实性，也不要求逐项标注。");
         }
         return PromptOverride.finalAnswerOnly(String.join("\n", finalRules));
     }

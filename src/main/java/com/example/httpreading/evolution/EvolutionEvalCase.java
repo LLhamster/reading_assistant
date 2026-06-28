@@ -90,8 +90,12 @@ public record EvolutionEvalCase(String id,
 
     public record EvidencePolicy(boolean useProvidedEvidence,
                                  boolean allowGeneralExplanation,
-                                 boolean allowHypotheticalExample,
-                                 boolean mustLabelHypotheticalExample) {
+                                 EvidenceUseMode evidenceUseMode) {
+        public EvidencePolicy {
+            evidenceUseMode = evidenceUseMode == null
+                ? EvidenceUseMode.STRICT_SOURCE
+                : evidenceUseMode;
+        }
     }
 
     public record FinalAnswerInput(String standaloneQuestion,
@@ -129,13 +133,13 @@ public record EvolutionEvalCase(String id,
         public ExpectedBehavior {
             scoringCriteria = scoringCriteria == null ? List.of() : List.copyOf(scoringCriteria);
             evidencePolicy = evidencePolicy == null
-                ? new EvidencePolicy(true, true, false, false)
+                ? new EvidencePolicy(true, true, EvidenceUseMode.STRICT_SOURCE)
                 : evidencePolicy;
         }
 
         static ExpectedBehavior empty() {
             return new ExpectedBehavior(List.of(), 0.0,
-                new EvidencePolicy(true, true, true, true), 500);
+                new EvidencePolicy(true, true, EvidenceUseMode.STRICT_SOURCE), 500);
         }
     }
 

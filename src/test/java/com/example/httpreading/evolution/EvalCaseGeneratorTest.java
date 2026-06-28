@@ -3,10 +3,16 @@ package com.example.httpreading.evolution;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import java.util.List;
 import java.util.Map;
 
+import com.example.httpreading.service.ModelClient;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 class EvalCaseGeneratorTest {
@@ -60,5 +66,90 @@ class EvalCaseGeneratorTest {
         assertEquals(3, cases.stream().map(EvolutionEvalCase::id).distinct().count());
         assertTrue(cases.stream().allMatch(evalCase ->
             !evalCase.finalAnswerInput().standaloneQuestion().isBlank()));
+    }
+
+    @Test
+    void mapsEvidenceUseModeFromTaskSemanticsInsteadOfExampleDetails() {
+        List<EvolutionEvalCase> common = generator.generate(List.of(), "u1", 2L, 4, 7);
+
+        assertTrue(common.stream()
+            .filter(value -> value.expectedFailureType() != FailureType.MISSING_STORY_DETAIL)
+            .allMatch(value -> value.expectedBehavior().evidencePolicy().evidenceUseMode()
+                == EvidenceUseMode.PEDAGOGICAL_ILLUSTRATION));
+        assertTrue(common.stream()
+            .filter(value -> value.expectedFailureType() == FailureType.MISSING_STORY_DETAIL)
+            .allMatch(value -> value.expectedBehavior().evidencePolicy().evidenceUseMode()
+                == EvidenceUseMode.SOURCE_GROUNDED_NARRATIVE));
+
+        MisunderstandingSignal strictSignal = new MisunderstandingSignal(
+            "strict", "m1", "问题：只根据原文回答，不要补充任何例子。\n结论：原文说明资源有限。",
+            FailureType.NOT_DIRECT, 0.9, 2L, 4, Map.of());
+        EvolutionEvalCase strictCase =
+            generator.generate(List.of(strictSignal), "u1", 2L, 4, 1).get(0);
+        assertEquals(EvidenceUseMode.STRICT_SOURCE,
+            strictCase.expectedBehavior().evidencePolicy().evidenceUseMode());
+    }
+
+    @Test
+    void generatedModeFromLlmTakesPrecedenceOverKeywordFallback() {
+        ModelClient modelClient = mock(ModelClient.class);
+        when(modelClient.chat(anyString())).thenReturn("""
+            {"cases":[{
+              "signalId":"semantic-1",
+              "failureType":"NOT_DIRECT",
+              "evidenceUseMode":"PEDAGOGICAL_ILLUSTRATION",
+              "reason":"任务实际要求用理论解释帮助理解，不承担原文事实声明"
+            }]}
+            """);
+        EvalCaseGenerator llmGenerator =
+            new EvalCaseGenerator(modelClient, new ObjectMapper());
+        MisunderstandingSignal signal = new MisunderstandingSignal(
+            "semantic-1", "m1",
+            "问题：只根据原文这个说法来帮助我理解机会成本。\n结论：选择意味着放弃替代收益。",
+            FailureType.NOT_DIRECT, 0.9, 2L, 4, Map.of());
+
+        EvolutionEvalCase evalCase =
+            llmGenerator.generate(List.of(signal), "u1", 2L, 4, 1).get(0);
+
+        assertEquals(EvidenceUseMode.PEDAGOGICAL_ILLUSTRATION,
+            evalCase.expectedBehavior().evidencePolicy().evidenceUseMode());
+    }
+
+    @Test
+    void invalidGeneratedModeFallsBackToKeywordRules() {
+        ModelClient modelClient = mock(ModelClient.class);
+        when(modelClient.chat(anyString())).thenReturn("""
+            {"cases":[{
+              "signalId":"strict-1",
+              "failureType":"NOT_DIRECT",
+              "evidenceUseMode":"UNKNOWN"
+            }]}
+            """);
+        EvalCaseGenerator llmGenerator =
+            new EvalCaseGenerator(modelClient, new ObjectMapper());
+        MisunderstandingSignal signal = new MisunderstandingSignal(
+            "strict-1", "m1",
+            "问题：只能依据原文回答，不得补充。\n结论：原文说明资源有限。",
+            FailureType.NOT_DIRECT, 0.9, 2L, 4, Map.of());
+
+        EvolutionEvalCase evalCase =
+            llmGenerator.generate(List.of(signal), "u1", 2L, 4, 1).get(0);
+
+        assertEquals(EvidenceUseMode.STRICT_SOURCE,
+            evalCase.expectedBehavior().evidencePolicy().evidenceUseMode());
+    }
+
+    @Test
+    void commonTemplatesDeclareModeWithoutCallingClassifier() {
+        ModelClient modelClient = mock(ModelClient.class);
+        EvalCaseGenerator llmGenerator =
+            new EvalCaseGenerator(modelClient, new ObjectMapper());
+
+        List<EvolutionEvalCase> cases =
+            llmGenerator.generate(List.of(), "u1", 2L, 4, 7);
+
+        verifyNoInteractions(modelClient);
+        assertTrue(cases.stream().allMatch(evalCase ->
+            evalCase.expectedBehavior().evidencePolicy().evidenceUseMode() != null));
     }
 }

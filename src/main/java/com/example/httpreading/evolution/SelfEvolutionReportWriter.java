@@ -122,6 +122,9 @@ public class SelfEvolutionReportWriter {
     private void appendCaseHeader(StringBuilder text, EvolutionEvalCase evalCase) {
         text.append("### ").append(evalCase.id()).append("\n\n")
             .append("**问题**：").append(evalCase.request().getQuestion()).append("\n\n")
+            .append("**证据用途**：")
+            .append(evalCase.expectedBehavior().evidencePolicy().evidenceUseMode())
+            .append("\n\n")
             .append("**理想回答评分项**：\n\n");
         for (EvolutionEvalCase.ScoringCriterion criterion
             : evalCase.expectedBehavior().scoringCriteria()) {

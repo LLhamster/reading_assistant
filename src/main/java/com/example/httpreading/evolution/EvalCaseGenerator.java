@@ -7,15 +7,22 @@ import java.util.Map;
 import java.util.Set;
 
 import com.example.httpreading.dto.AiChatRequest;
+import com.example.httpreading.service.ModelClient;
 import com.example.httpreading.service.ai.AnswerMode;
 import com.example.httpreading.service.ai.AnswerRequirement;
 import com.example.httpreading.service.ai.DetailLevel;
 import com.example.httpreading.service.ai.EvidenceStrictness;
 import com.example.httpreading.service.ai.SubIntent;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 @Service
 public class EvalCaseGenerator {
+    private static final Logger log = LoggerFactory.getLogger(EvalCaseGenerator.class);
     public static final int DEFAULT_CASE_COUNT = 30;
     private static final List<FailureType> COMMON_TYPES = List.of(
         FailureType.TOO_CONCEPTUAL,
@@ -31,37 +38,58 @@ public class EvalCaseGenerator {
             "不要先下定义，请用便利店顾客在两种早餐之间选择的生活场景，解释“机会成本是放弃的最佳替代方案”。",
             "机会成本是不是买早餐实际付出去的钱？",
             "不完全是；它更关注选择一种方案时放弃的最佳替代收益。",
-            "顾客只有20元和十分钟，可以排队购买喜欢的现做早餐，也可以立即购买普通面包。选择其一会放弃另一选择带来的最好收益。"),
+            "顾客只有20元和十分钟，可以排队购买喜欢的现做早餐，也可以立即购买普通面包。选择其一会放弃另一选择带来的最好收益。",
+            EvidenceUseMode.PEDAGOGICAL_ILLUSTRATION),
         FailureType.TOO_SIMPLE, new CommonTemplate(
             "为什么“损失100元的心理冲击通常强于获得100元的满足感”？请从参照点、感受差异和决策影响讲清推导过程。",
             "损失100元和获得100元的心理感受应该完全对称吗？",
             "损失厌恶认为两者通常不对称，损失带来的感受更强。",
-            "人们通常以当前拥有状态为参照点；同等金额下，损失区的心理反应强于收益区，这会让人更倾向于规避可能的损失。"),
+            "人们通常以当前拥有状态为参照点；同等金额下，损失区的心理反应强于收益区，这会让人更倾向于规避可能的损失。",
+            EvidenceUseMode.PEDAGOGICAL_ILLUSTRATION),
         FailureType.REPETITIVE, new CommonTemplate(
             "不要重复“新闻切换很快”这个结论，请补充说明快速切换为什么会削弱读者形成连续判断。",
             "为什么碎片化新闻让人难以形成连续理解？",
             "因为节目把互不相关的事件快速并置，上一条信息很快被下一条替代。",
-            "灾难新闻之后立即切换到广告和天气，会中断因果追踪；注意力不断重置，使读者难以比较证据、保留前提并形成连续判断。"),
+            "灾难新闻之后立即切换到广告和天气，会中断因果追踪；注意力不断重置，使读者难以比较证据、保留前提并形成连续判断。",
+            EvidenceUseMode.PEDAGOGICAL_ILLUSTRATION),
         FailureType.MISSING_EXAMPLE, new CommonTemplate(
             "请用一家小店在“购买新设备”和“投放广告”之间选择的具体例子，说明机会成本，并解释例子如何对应这个概念。",
             "机会成本指什么？",
             "它是作出选择时放弃的最佳替代方案所能带来的收益。",
-            "小店只有一笔预算，只能购买提高产能的设备或投放带来新顾客的广告；选择设备时，放弃的广告预期收益构成机会成本。"),
+            "小店只有一笔预算，只能购买提高产能的设备或投放带来新顾客的广告；选择设备时，放弃的广告预期收益构成机会成本。",
+            EvidenceUseMode.PEDAGOGICAL_ILLUSTRATION),
         FailureType.MISSING_STORY_DETAIL, new CommonTemplate(
             "请把洞穴中的人从只能看影子到最终看见太阳的过程讲成完整故事，包含起点、发展、转折、结果，并回扣“认识需要逐步适应”的观点。",
             "走出洞穴是不是一瞬间完成的顿悟？",
             "不是；这个过程经历看影子、看映像、看事物本身，最后才能看太阳。",
-            "被释放者起初只能看清影子；转身和走向洞外会感到刺痛与困惑，随后逐步适应映像、事物和天空，最后才能直视太阳。"),
+            "被释放者起初只能看清影子；转身和走向洞外会感到刺痛与困惑，随后逐步适应映像、事物和天空，最后才能直视太阳。",
+            EvidenceUseMode.SOURCE_GROUNDED_NARRATIVE),
         FailureType.NOT_DIRECT, new CommonTemplate(
             "农业社会人口流动通常较少的主要原因是什么？请先给核心结论，再解释土地和长期生活关系的作用。",
             "为什么传统农业社会中的人往往长期留在同一地方？",
             "农业生产依赖固定土地，长期定居也形成稳定的家庭和熟人关系。",
-            "耕作需要持续照料固定土地；代际居住、互助和熟人信用进一步提高迁移成本，因此人口流动通常较少。"),
+            "耕作需要持续照料固定土地；代际居住、互助和熟人信用进一步提高迁移成本，因此人口流动通常较少。",
+            EvidenceUseMode.PEDAGOGICAL_ILLUSTRATION),
         FailureType.OFF_TOPIC, new CommonTemplate(
             "只解释为什么熟人社会依赖长期重复交往，并说明重复交往如何形成信任。",
             "熟人社会中的信任从哪里来？",
             "共同生活和反复互动让人能够观察彼此行为，并形成稳定预期。",
-            "长期重复交往使失信行为会在后续互动中付出代价，也让承诺能够被持续检验，因此逐渐形成稳定信任。"));
+            "长期重复交往使失信行为会在后续互动中付出代价，也让承诺能够被持续检验，因此逐渐形成稳定信任。",
+            EvidenceUseMode.PEDAGOGICAL_ILLUSTRATION));
+
+    private final ModelClient modelClient;
+    private final ObjectMapper objectMapper;
+
+    EvalCaseGenerator() {
+        this.modelClient = null;
+        this.objectMapper = new ObjectMapper();
+    }
+
+    @Autowired
+    public EvalCaseGenerator(ModelClient modelClient, ObjectMapper objectMapper) {
+        this.modelClient = modelClient;
+        this.objectMapper = objectMapper;
+    }
 
     public List<EvolutionEvalCase> generate(List<MisunderstandingSignal> minedSignals,
                                            String userId,
@@ -86,6 +114,8 @@ public class EvalCaseGenerator {
                 defaultBookId, defaultChapterIndex, Map.of("source", "common")));
             seedIndex++;
         }
+        Map<String, EvidenceUseMode> generatedModes = generateEvidenceUseModes(
+            inputs.subList(0, Math.min(inputs.size(), caseCount)));
 
         List<EvolutionEvalCase> cases = new ArrayList<>(caseCount);
         Set<String> seenQuestions = new LinkedHashSet<>();
@@ -103,6 +133,9 @@ public class EvalCaseGenerator {
             List<EvolutionEvalCase.DialogueTurn> dialogue = dialogue(signal, template);
             List<EvolutionEvalCase.CollectedEvidence> evidence =
                 evidence(signal, template, dialogue, cases.size());
+            EvidenceUseMode evidenceUseMode = isCommonSignal(signal)
+                ? template.evidenceUseMode()
+                : generatedModes.getOrDefault(modeKey(signal), fallbackEvidenceUseMode(signal, question));
             cases.add(new EvolutionEvalCase(
                 "evolution-" + String.format("%02d", cases.size() + 1),
                 signal.id(),
@@ -114,8 +147,8 @@ public class EvalCaseGenerator {
                 dialogue,
                 evidence,
                 mcpResults(signal, template, dialogue),
-                finalAnswerInput(signal.failureType(), question),
-                expectedBehavior(signal.failureType(), question),
+                finalAnswerInput(signal.failureType(), question, evidenceUseMode),
+                expectedBehavior(signal.failureType(), question, evidenceUseMode),
                 variant == 0 ? "MEDIUM" : "HARD",
                 category(signal.failureType())));
         }
@@ -191,20 +224,20 @@ public class EvalCaseGenerator {
                     : Map.of("items", List.of(signal.sourceText()))));
     }
 
-    private EvolutionEvalCase.FinalAnswerInput finalAnswerInput(FailureType type, String question) {
-        boolean hypothetical = type == FailureType.TOO_CONCEPTUAL
-            || type == FailureType.MISSING_EXAMPLE
-            || type == FailureType.MISSING_STORY_DETAIL;
-        AnswerMode mode = hypothetical
+    private EvolutionEvalCase.FinalAnswerInput finalAnswerInput(FailureType type,
+                                                                String question,
+                                                                EvidenceUseMode evidenceUseMode) {
+        boolean allowSupplement = evidenceUseMode != EvidenceUseMode.STRICT_SOURCE;
+        AnswerMode mode = allowSupplement
             ? AnswerMode.CONTEXT_ANCHORED_MODEL_KNOWLEDGE
             : AnswerMode.TEXT_ONLY;
-        EvidenceStrictness strictness = hypothetical
+        EvidenceStrictness strictness = allowSupplement
             ? EvidenceStrictness.MEDIUM
             : EvidenceStrictness.STRICT;
         return new EvolutionEvalCase.FinalAnswerInput(
             question,
             subIntent(type),
-            answerRequirement(type, hypothetical),
+            answerRequirement(type, allowSupplement),
             mode,
             strictness,
             true,
@@ -238,7 +271,9 @@ public class EvalCaseGenerator {
         };
     }
 
-    private EvolutionEvalCase.ExpectedBehavior expectedBehavior(FailureType type, String question) {
+    private EvolutionEvalCase.ExpectedBehavior expectedBehavior(FailureType type,
+                                                                 String question,
+                                                                 EvidenceUseMode evidenceUseMode) {
         List<EvolutionEvalCase.ScoringCriterion> criteria = List.of(
             new EvolutionEvalCase.ScoringCriterion(
                 "answer_current_question",
@@ -247,7 +282,8 @@ public class EvalCaseGenerator {
             new EvolutionEvalCase.ScoringCriterion(
                 criterionId(type), criterionDescription(type), 1.0));
         return new EvolutionEvalCase.ExpectedBehavior(
-            criteria, 2.0, evidencePolicy(type), 700);
+            criteria, 2.0, new EvolutionEvalCase.EvidencePolicy(
+                true, true, evidenceUseMode), 700);
     }
 
     private String criterionId(FailureType type) {
@@ -276,11 +312,120 @@ public class EvalCaseGenerator {
         };
     }
 
-    private EvolutionEvalCase.EvidencePolicy evidencePolicy(FailureType type) {
-        boolean hypothetical = type == FailureType.TOO_CONCEPTUAL
-            || type == FailureType.MISSING_EXAMPLE
-            || type == FailureType.MISSING_STORY_DETAIL;
-        return new EvolutionEvalCase.EvidencePolicy(true, true, hypothetical, hypothetical);
+    private Map<String, EvidenceUseMode> generateEvidenceUseModes(
+        List<MisunderstandingSignal> signals) {
+        List<MisunderstandingSignal> minedSignals = signals.stream()
+            .filter(signal -> !isCommonSignal(signal))
+            .distinct()
+            .toList();
+        if (minedSignals.isEmpty() || modelClient == null) {
+            return Map.of();
+        }
+        try {
+            JsonNode root = objectMapper.readTree(extractJson(modelClient.chat(
+                evidenceUseModePrompt(minedSignals))));
+            JsonNode cases = root.isArray() ? root : root.path("cases");
+            if (!cases.isArray()) {
+                throw new IllegalArgumentException("cases must be a JSON array");
+            }
+            Set<String> expectedKeys = minedSignals.stream()
+                .map(this::modeKey)
+                .collect(java.util.stream.Collectors.toSet());
+            Map<String, EvidenceUseMode> result = new java.util.LinkedHashMap<>();
+            for (JsonNode node : cases) {
+                String signalId = node.path("signalId").asText("").trim();
+                String failureType = node.path("failureType").asText("").trim();
+                String rawMode = node.has("evidenceUseMode")
+                    ? node.path("evidenceUseMode").asText("")
+                    : node.path("evidence_use_mode").asText("");
+                String key = signalId + ":" + failureType;
+                try {
+                    EvidenceUseMode mode =
+                        EvidenceUseMode.valueOf(rawMode.trim().toUpperCase());
+                    if (expectedKeys.contains(key)) {
+                        result.put(key, mode);
+                    }
+                } catch (IllegalArgumentException exception) {
+                    log.warn("Self-Evolution signal={} 的 evidenceUseMode 非法，使用关键词兜底: {}",
+                        signalId, rawMode);
+                }
+            }
+            return Map.copyOf(result);
+        } catch (Exception exception) {
+            log.warn("Self-Evolution 测试用例 evidenceUseMode 生成失败，使用关键词兜底: {}",
+                exception.getMessage());
+            return Map.of();
+        }
+    }
+
+    private String evidenceUseModePrompt(List<MisunderstandingSignal> signals) throws Exception {
+        List<Map<String, Object>> input = signals.stream().map(signal -> Map.<String, Object>of(
+            "signalId", signal.id(),
+            "failureType", signal.failureType().name(),
+            "sourceText", signal.sourceText(),
+            "generatedQuestion", question(signal, commonTemplate(signal.failureType()), 0),
+            "providedEvidence", signal.sourceText())).toList();
+        return """
+            你是测试用例生成器中的证据用途分类器。请根据每个测试任务的目标、问题和提供证据，
+            直接为生成的测试用例输出 evidenceUseMode。不要依赖单个关键词机械分类，要判断回答中
+            的具体内容在这个任务里承担什么用途。
+
+            模式只能是：
+            - STRICT_SOURCE：用户明确要求只能依据原文/给定资料，不能进行证据外补充。
+            - SOURCE_GROUNDED_NARRATIVE：任务要求复述历史、原文、真实事件、出处或基于文本还原过程。
+            - PEDAGOGICAL_ILLUSTRATION：任务是解释概念、原因或理论，生活人物、数字和场景用于帮助理解，
+              不承担真实事件或原文记录声明。
+
+            必须为每个输入恰好输出一项，保留原 signalId 和 failureType。
+            只输出 JSON：
+            {"cases":[
+              {"signalId":"原值","failureType":"原值",
+               "evidenceUseMode":"STRICT_SOURCE|SOURCE_GROUNDED_NARRATIVE|PEDAGOGICAL_ILLUSTRATION",
+               "reason":"简短语义判断"}
+            ]}
+
+            inputs:
+            %s
+            """.formatted(objectMapper.writeValueAsString(input));
+    }
+
+    private EvidenceUseMode fallbackEvidenceUseMode(
+        MisunderstandingSignal signal,
+        String question) {
+        String priorQuestion = section(signal.sourceText(), "问题：", "结论：");
+        String intent = (priorQuestion + " " + question).toLowerCase();
+        if (intent.matches(".*(只根据|只能依据|严格依据|不得补充|不要补充|逐字原文).*")) {
+            return EvidenceUseMode.STRICT_SOURCE;
+        }
+        if (signal.failureType() == FailureType.MISSING_STORY_DETAIL
+            || intent.matches(".*(真实.{0,8}(故事|案例|事件)|历史.{0,8}(事件|案例|故事|过程)|"
+                + "原文.{0,8}(案例|故事|过程|复述)|出处|记载|事实核验|"
+                + "基于.{0,8}(文本|原文).{0,8}(复述|讲述|还原)).*")) {
+            return EvidenceUseMode.SOURCE_GROUNDED_NARRATIVE;
+        }
+        return EvidenceUseMode.PEDAGOGICAL_ILLUSTRATION;
+    }
+
+    private boolean isCommonSignal(MisunderstandingSignal signal) {
+        return signal.sourceText().isBlank()
+            || "common".equals(String.valueOf(signal.metadata().get("source")));
+    }
+
+    private String modeKey(MisunderstandingSignal signal) {
+        return signal.id() + ":" + signal.failureType().name();
+    }
+
+    private String extractJson(String raw) {
+        String text = raw == null ? "" : raw.trim();
+        int objectStart = text.indexOf('{');
+        int arrayStart = text.indexOf('[');
+        int start = objectStart < 0 ? arrayStart
+            : arrayStart < 0 ? objectStart : Math.min(objectStart, arrayStart);
+        int end = Math.max(text.lastIndexOf('}'), text.lastIndexOf(']'));
+        if (start < 0 || end <= start) {
+            throw new IllegalArgumentException("model output is not JSON");
+        }
+        return text.substring(start, end + 1);
     }
 
     private String category(FailureType type) {
@@ -388,6 +533,7 @@ public class EvalCaseGenerator {
     private record CommonTemplate(String question,
                                   String priorQuestion,
                                   String priorAnswer,
-                                  String evidence) {
+                                  String evidence,
+                                  EvidenceUseMode evidenceUseMode) {
     }
 }

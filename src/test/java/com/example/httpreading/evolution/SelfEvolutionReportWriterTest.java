@@ -40,6 +40,7 @@ class SelfEvolutionReportWriterTest {
         assertTrue(jsonl.contains("\"expected_behavior\""));
         assertTrue(jsonl.contains("\"scoring_criteria\""));
         assertTrue(jsonl.contains("\"evidence_policy\""));
+        assertTrue(jsonl.contains("\"evidence_use_mode\""));
         assertTrue(jsonl.contains("\"final_answer_input\""));
         assertTrue(!jsonl.contains("\"must_include\""));
         assertTrue(!jsonl.contains("\"must_not_include\""));
@@ -51,6 +52,7 @@ class SelfEvolutionReportWriterTest {
         assertTrue(markdown.contains("内容评分原因"));
         assertTrue(markdown.contains("证据边界原因"));
         assertTrue(markdown.contains("Evidence Judge"));
+        assertTrue(markdown.contains("证据用途"));
         assertTrue(markdown.contains("experiment valid: true"));
         assertTrue(markdown.contains("缺少具体场景"));
     }

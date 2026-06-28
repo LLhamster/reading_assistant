@@ -1,5 +1,6 @@
 package com.example.httpreading.evolution;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -16,21 +17,23 @@ import org.junit.jupiter.api.Test;
 
 class EvidenceBoundaryJudgeTest {
     @Test
-    void catchesUnsupportedDetailsFromRealCandidateRegressionSample() {
+    void catchesUnsupportedFactsAndFalseSourceAttributionInHistoricalNarrative() {
         EvidenceBoundaryJudge judge = judge("""
             {
               "claims":[
-                {"claim":"农会组织农民集体开渠引水","classification":"UNSUPPORTED_CONCRETE","reason":"历史摘要没有该事件"},
-                {"claim":"他家隐瞒了八亩水田","classification":"UNSUPPORTED_CONCRETE","reason":"证据没有田亩数字"},
-                {"claim":"他揣了两块银圆","classification":"UNSUPPORTED_CONCRETE","reason":"证据没有银圆细节"},
-                {"claim":"农会会长当众要求先开群众会","classification":"UNSUPPORTED_CONCRETE","reason":"证据没有人物和处理过程"}
+                {"claim":"农会组织农民集体开渠引水","classification":"UNSUPPORTED_FACTUAL_CLAIM","reason":"历史摘要没有该事件"},
+                {"claim":"他家隐瞒了八亩水田","classification":"UNSUPPORTED_FACTUAL_CLAIM","reason":"证据没有田亩数字"},
+                {"claim":"他揣了两块银圆","classification":"UNSUPPORTED_FACTUAL_CLAIM","reason":"证据没有银圆细节"},
+                {"claim":"农会会长当众要求先开群众会","classification":"UNSUPPORTED_FACTUAL_CLAIM","reason":"证据没有人物和处理过程"}
               ],
-              "hypothetical_content_present":true,
-              "hypothetical_label_position":"MISSING",
+              "possible_scenario_present":true,
+              "scenario_label_position":"MISSING",
               "violations":[]
             }
             """);
         EvolutionEvalCase evalCase = minedStoryCase();
+        assertEquals(EvidenceUseMode.SOURCE_GROUNDED_NARRATIVE,
+            evalCase.expectedBehavior().evidencePolicy().evidenceUseMode());
         String answer = """
             有个中等地主在春耕前遇到农会开渠引水。区里干部发现他隐瞒了八亩水田。
             后来他揣了两块银圆去申请入会，农会会长要求先开群众会。
@@ -45,33 +48,124 @@ class EvidenceBoundaryJudgeTest {
         assertTrue(result.violations().stream().anyMatch(value -> value.contains("两块银圆")));
         assertTrue(result.violations().stream().anyMatch(value -> value.contains("农会会长")));
         assertTrue(result.violations().stream().anyMatch(value -> value.contains("没有 current_page/RAG")));
-        assertTrue(result.violations().stream().anyMatch(value -> value.contains("首次出现前")));
+        assertTrue(result.violations().stream().anyMatch(value -> value.contains("场景开始前")));
     }
 
     @Test
-    void requiresHypotheticalLabelBeforeFirstInventedDetail() {
+    void acceptsOneUpfrontPossibilityLabelForAnEntireHistoricalScene() {
+        EvidenceBoundaryJudge judge = judge("""
+            {"claims":[{"claim":"有一个地主陈满叔在春耕时遇到农会组织灌水",
+                         "classification":"LABELED_POSSIBLE_SCENARIO",
+                         "reason":"场景开始前已经说明这是当时可能出现的情况"}],
+             "possible_scenario_present":true,
+             "scenario_label_position":"BEFORE_OR_AT_FIRST","violations":[]}
+            """);
+
+        EvidenceBoundaryJudge.EvidenceReview result = judge.review(
+            minedStoryCase(),
+            "在当时可能会有这种情况，有一个地主陈满叔在春耕时遇到农会组织灌水，"
+                + "随后与农户发生争执，最后才理解组织方式。");
+
+        assertTrue(result.safe());
+    }
+
+    @Test
+    void acceptsPossibilityLabelInSameParagraphAsFirstHistoricalClaim() {
+        EvidenceBoundaryJudge judge = judge("""
+            {"claims":[{"claim":"以下为假设性示例。有一个地主在春耕时遇到农会组织灌水",
+                         "classification":"LABELED_POSSIBLE_SCENARIO",
+                         "reason":"同段开头已经标明是假设性示例"}],
+             "possible_scenario_present":true,
+             "scenario_label_position":"BEFORE_OR_AT_FIRST","violations":[]}
+            """);
+
+        assertTrue(judge.review(
+            minedStoryCase(),
+            "以下为假设性示例。有一个地主在春耕时遇到农会组织灌水，随后改变了态度。"
+        ).safe());
+    }
+
+    @Test
+    void rejectsHistoricalPossibilityLabelAddedOnlyAtTheEnd() {
+        EvidenceBoundaryJudge judge = judge("""
+            {"claims":[{"claim":"有一个地主在春耕时遇到农会组织灌水",
+                         "classification":"LABELED_POSSIBLE_SCENARIO",
+                         "reason":"直到结尾才声明是假设"}],
+             "possible_scenario_present":true,
+             "scenario_label_position":"AFTER","violations":[]}
+            """);
+
+        assertFalse(judge.review(
+            minedStoryCase(),
+            "有一个地主在春耕时遇到农会组织灌水，随后改变了态度。以上是假设。"
+        ).safe());
+    }
+
+    @Test
+    void doesNotLetAnUnlabeledHistoricalSceneBypassAsPedagogical() {
+        EvidenceBoundaryJudge judge = judge("""
+            {"claims":[{"claim":"有一个地主在春耕时遇到农会组织灌水",
+                         "classification":"PEDAGOGICAL_ILLUSTRATION",
+                         "reason":"模型把历史语境中的补写误分为普通举例"}],
+             "possible_scenario_present":false,
+             "scenario_label_position":"MISSING","violations":[]}
+            """);
+
+        EvidenceBoundaryJudge.EvidenceReview result = judge.review(
+            minedStoryCase(),
+            "有一个地主在春耕时遇到农会组织灌水，随后改变了态度。");
+
+        assertFalse(result.safe());
+        assertTrue(result.violations().stream().anyMatch(value -> value.contains("场景开始前")));
+    }
+
+    @Test
+    void allowsConcretePedagogicalExampleWithoutTruthLabel() {
+        EvidenceBoundaryJudge judge = judge("""
+            {"claims":[{"claim":"一家便利店投入三万元增加夜间库存",
+                         "classification":"PEDAGOGICAL_ILLUSTRATION",
+                         "reason":"用生活场景解释机会成本，不承担真实事件声明"}],
+             "possible_scenario_present":false,
+             "scenario_label_position":"NOT_APPLICABLE","violations":[]}
+            """);
         EvolutionEvalCase evalCase = commonExampleCase();
-        EvidenceBoundaryJudge afterJudge = judge("""
-            {"claims":[{"claim":"王明选择了三明治","classification":"LABELED_HYPOTHETICAL","reason":"结尾才声明是假设"}],
-             "hypothetical_content_present":true,
-             "hypothetical_label_position":"AFTER","violations":[]}
-            """);
-        EvidenceBoundaryJudge beforeJudge = judge("""
-            {"claims":[{"claim":"王明选择了三明治","classification":"LABELED_HYPOTHETICAL","reason":"故事开始前已声明是假设"}],
-             "hypothetical_content_present":true,
-             "hypothetical_label_position":"BEFORE_OR_AT_FIRST","violations":[]}
-            """);
+        assertEquals(EvidenceUseMode.PEDAGOGICAL_ILLUSTRATION,
+            evalCase.expectedBehavior().evidencePolicy().evidenceUseMode());
 
-        assertFalse(afterJudge.review(evalCase, "王明选择了三明治。以上是假设。").safe());
-        assertTrue(beforeJudge.review(evalCase, "假设王明选择了三明治。").safe());
+        EvidenceBoundaryJudge.EvidenceReview result = judge.review(
+            evalCase,
+            "一家便利店投入三万元增加夜间库存，就放弃了把同一笔钱用于早餐设备的收益。"
+                + "这个取舍说明资源用于一个选项时，会失去另一个选项的机会。");
+
+        assertTrue(result.safe());
     }
 
     @Test
-    void filtersBlankViolationsAndAllowsSupportedClaims() {
+    void strictSourceRejectsConstructedContentEvenWhenItIsLabeled() {
+        EvidenceBoundaryJudge judge = judge("""
+            {"claims":[{"claim":"假设某店投入三万元",
+                         "classification":"PEDAGOGICAL_ILLUSTRATION",
+                         "reason":"这是证据外构造的教学例子"}],
+             "possible_scenario_present":true,
+             "scenario_label_position":"BEFORE_OR_AT_FIRST","violations":[]}
+            """);
+        EvolutionEvalCase strictCase = withMode(commonExampleCase(), EvidenceUseMode.STRICT_SOURCE);
+
+        EvidenceBoundaryJudge.EvidenceReview result =
+            judge.review(strictCase, "假设某店投入三万元。");
+
+        assertFalse(result.safe());
+        assertTrue(result.violations().stream().anyMatch(value ->
+            value.contains("严格来源模式不允许证据外构造内容")));
+    }
+
+    @Test
+    void filtersBlankAndSuccessViolationsAndAllowsSupportedClaims() {
         EvidenceBoundaryJudge judge = judge("""
             {"claims":[{"claim":"顾客只有20元和十分钟","classification":"SUPPORTED","reason":"current_page 直接提供"}],
-             "hypothetical_content_present":false,
-             "hypothetical_label_position":"NOT_APPLICABLE","violations":["","   "]}
+             "possible_scenario_present":false,
+             "scenario_label_position":"NOT_APPLICABLE",
+             "violations":["","   ","未发现违规：回答符合证据策略"]}
             """);
 
         EvidenceBoundaryJudge.EvidenceReview result =
@@ -117,5 +211,17 @@ class EvidenceBoundaryJudgeTest {
             FailureType.MISSING_STORY_DETAIL, 0.9, 44L, 2, Map.of());
         return new EvalCaseGenerator()
             .generate(List.of(signal), "11", 44L, 2, 1).get(0);
+    }
+
+    private EvolutionEvalCase withMode(EvolutionEvalCase source, EvidenceUseMode mode) {
+        EvolutionEvalCase.ExpectedBehavior old = source.expectedBehavior();
+        EvolutionEvalCase.ExpectedBehavior behavior = new EvolutionEvalCase.ExpectedBehavior(
+            old.scoringCriteria(), old.maxScore(),
+            new EvolutionEvalCase.EvidencePolicy(true, true, mode), old.maxChars());
+        return new EvolutionEvalCase(
+            source.id(), source.signalId(), source.request(), source.expectedFailureType(),
+            source.anchorTerms(), source.minimumAnswerChars(), source.previousAnswer(),
+            source.dialogue(), source.collectedEvidence(), source.mcpResults(),
+            source.finalAnswerInput(), behavior, source.difficulty(), source.category());
     }
 }

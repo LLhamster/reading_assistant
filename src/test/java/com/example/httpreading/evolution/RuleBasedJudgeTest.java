@@ -16,8 +16,8 @@ import org.junit.jupiter.api.Test;
 class RuleBasedJudgeTest {
     private static final String SAFE_EVIDENCE = """
         {"claims":[{"claim":"回答中的核心说明","classification":"SUPPORTED","reason":"由测试证据支持"}],
-         "hypothetical_content_present":false,
-         "hypothetical_label_position":"NOT_APPLICABLE","violations":[]}
+         "possible_scenario_present":false,
+         "scenario_label_position":"NOT_APPLICABLE","violations":[]}
         """;
 
     @Test
@@ -44,15 +44,15 @@ class RuleBasedJudgeTest {
               {"id":"answer_current_question","score":1.0,"reason":"直接回答"},
               {"id":"provide_requested_example","score":1.0,"reason":"例子具体且有对应关系"}],
              "force_zero":false,"feedback":""}
-            """, """
-            {"claims":[{"claim":"一家小店收入100元","classification":"LABELED_HYPOTHETICAL","reason":"前置标注假设"}],
-             "hypothetical_content_present":true,
-             "hypothetical_label_position":"BEFORE_OR_AT_FIRST","violations":[]}
+        """, """
+            {"claims":[{"claim":"一家小店收入100元","classification":"PEDAGOGICAL_ILLUSTRATION","reason":"用于解释理论"}],
+             "possible_scenario_present":false,
+             "scenario_label_position":"NOT_APPLICABLE","violations":[]}
             """);
 
         EvolutionCaseResult result = judge.judge(
             evalCase(FailureType.MISSING_EXAMPLE),
-            run("例如，假设一家小店收入100元，其中60元补充原料，这说明两个量不能混为一谈。"));
+            run("例如，一家小店收入100元，其中60元补充原料，这说明两个量不能混为一谈。"));
 
         assertTrue(result.passed());
     }
@@ -64,10 +64,10 @@ class RuleBasedJudgeTest {
               {"id":"answer_current_question","score":1.0,"reason":"形式上回答"},
               {"id":"complete_story","score":1.0,"reason":"故事完整"}],
              "force_zero":false,"feedback":""}
-            """, """
-            {"claims":[{"claim":"某村真实发生了一个完整故事","classification":"UNSUPPORTED_CONCRETE","reason":"证据未提供该事件"}],
-             "hypothetical_content_present":false,
-             "hypothetical_label_position":"MISSING","violations":["没有书籍证据却把虚构故事表述为真实事件"]}
+        """, """
+            {"claims":[{"claim":"某村真实发生了一个完整故事","classification":"UNSUPPORTED_FACTUAL_CLAIM","reason":"证据未提供该事件"}],
+             "possible_scenario_present":false,
+             "scenario_label_position":"MISSING","violations":["没有书籍证据却把虚构故事表述为真实事件"]}
             """);
         EvolutionCaseResult evidenceResult = evidenceJudge.judge(
             evalCase(FailureType.MISSING_STORY_DETAIL), run("某村真实发生了一个完整故事。"));
@@ -104,7 +104,11 @@ class RuleBasedJudgeTest {
                 new EvolutionEvalCase.ScoringCriterion("answer_current_question", "回答本轮问题", 1.0),
                 new EvolutionEvalCase.ScoringCriterion(secondId, "满足专项要求", 1.0)),
             2.0,
-            new EvolutionEvalCase.EvidencePolicy(true, true, true, true),
+            new EvolutionEvalCase.EvidencePolicy(
+                true, true,
+                type == FailureType.MISSING_STORY_DETAIL
+                    ? EvidenceUseMode.SOURCE_GROUNDED_NARRATIVE
+                    : EvidenceUseMode.PEDAGOGICAL_ILLUSTRATION),
             500);
         return new EvolutionEvalCase(
             "c1", "s1", request, type, List.of(), 0, "",
