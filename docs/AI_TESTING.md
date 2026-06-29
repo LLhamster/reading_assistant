@@ -67,8 +67,10 @@ Self-Evolution 用例不使用 must_include、must_not_include 或 style_constra
 都作为正向 scoring_criteria 独立计分。
 内容评分与证据审查相互独立：Scoring Judge 只按 scoring_criteria 加分，Evidence Boundary Judge
 按照 `evidence_use_mode` 检查具体事实与来源归因。`STRICT_SOURCE` 只允许证据直接支持的事实；
-`SOURCE_GROUNDED_NARRATIVE` 允许在历史或事实叙事中补充想象场景，但必须在连续场景开始前统一
-说明“可能、假设或用于理解”；`PEDAGOGICAL_ILLUSTRATION` 允许用人物、数字和生活场景解释理论，
+`SOURCE_GROUNDED_NARRATIVE` 允许在历史或事实叙事中补充想象场景；回答任意位置说明“可能、
+假设或用于理解”，或明确声明“以下为助手自主构造、没有资料依据”，即可覆盖整个连续场景，
+无需逐项标注，但仍不能把补写内容归因成原文事实。`STRICT_SOURCE` 不能
+通过免责声明绕过证据要求。`PEDAGOGICAL_ILLUSTRATION` 允许用人物、数字和生活场景解释理论，
 无需声明例子是否真实，但不能冒充历史事实或原文记录。证据违规会成为硬失败；任一 Judge 调用
 或解析失败会令整轮实验无效，不能推荐候选 Prompt。
 通用测试模板直接声明自己的 `evidence_use_mode`；从真实 memory signal 生成用例时，由 LLM 在
@@ -96,8 +98,14 @@ MODEL_API_KEY=xxx mvn \
 `report.md` 和可逐行检查的 `eval-cases.jsonl`。一次完整实验除 FinalAnswer 调用外还会为
 baseline/candidate 的每个回答调用 Judge 模型。
 当前每个回答会调用一次 Scoring Judge 和一次 Evidence Boundary Judge。
+Evidence Boundary Judge 使用 `temperature=0`；只有初始判断中的争议 claim 即将触发证据硬失败时，
+才会额外批量调用一次 Entailment Judge，复核同义改写、理论展开、教学举例和新增外部事实。
 如果 baseline 全部通过且没有硬失败，实验会提前结束，不生成候选 FinalAnswer patch，也不会运行 candidate
 和第二轮 Judge。模型全部执行失败或无法生成有效 patch 时也会提前结束，不重复运行等价 candidate。
+默认策略为 `BATCH_AGGREGATE`：先执行并评测全部 baseline，用全部失败的类型、数量、代表例子和
+修正建议生成一个聚合候选 patch，再统一运行全部 candidate；不会按单个问答逐次修改 Prompt。
+`report.json` 保留完整 claim 级证据审计，`report.md` 只按证据问题类型汇总并展示最多两个例子，
+同时记录候选 patch 和追加 patch 后实际生效的完整可进化策略区。
 
 ### 默认 mock 回归测试
 

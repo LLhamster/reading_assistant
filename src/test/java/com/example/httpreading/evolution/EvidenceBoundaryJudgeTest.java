@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -30,6 +31,13 @@ class EvidenceBoundaryJudgeTest {
               "scenario_label_position":"MISSING",
               "violations":[]
             }
+            """, """
+            {"reviews":[
+              {"index":0,"relation":"UNSUPPORTED_EXTERNAL_FACT","reason":"新增历史事件"},
+              {"index":1,"relation":"UNSUPPORTED_EXTERNAL_FACT","reason":"新增田亩数字"},
+              {"index":2,"relation":"UNSUPPORTED_EXTERNAL_FACT","reason":"新增银圆细节"},
+              {"index":3,"relation":"UNSUPPORTED_EXTERNAL_FACT","reason":"新增人物和过程"}
+            ]}
             """);
         EvolutionEvalCase evalCase = minedStoryCase();
         assertEquals(EvidenceUseMode.SOURCE_GROUNDED_NARRATIVE,
@@ -45,10 +53,11 @@ class EvidenceBoundaryJudgeTest {
         assertTrue(result.evaluated());
         assertFalse(result.safe());
         assertTrue(result.violations().stream().anyMatch(value -> value.contains("八亩水田")));
-        assertTrue(result.violations().stream().anyMatch(value -> value.contains("两块银圆")));
-        assertTrue(result.violations().stream().anyMatch(value -> value.contains("农会会长")));
-        assertTrue(result.violations().stream().anyMatch(value -> value.contains("没有 current_page/RAG")));
-        assertTrue(result.violations().stream().anyMatch(value -> value.contains("场景开始前")));
+        assertTrue(result.issues().stream().allMatch(issue -> issue.examples().size() <= 2));
+        assertTrue(result.issues().stream().anyMatch(issue ->
+            issue.type() == EvidenceIssueType.FALSE_SOURCE_ATTRIBUTION));
+        assertTrue(result.issues().stream().anyMatch(issue ->
+            issue.type() == EvidenceIssueType.UNLABELED_UNGROUNDED_SECTION));
     }
 
     @Test
@@ -86,7 +95,7 @@ class EvidenceBoundaryJudgeTest {
     }
 
     @Test
-    void rejectsHistoricalPossibilityLabelAddedOnlyAtTheEnd() {
+    void acceptsHistoricalDisclosureAddedAtTheEnd() {
         EvidenceBoundaryJudge judge = judge("""
             {"claims":[{"claim":"有一个地主在春耕时遇到农会组织灌水",
                          "classification":"LABELED_POSSIBLE_SCENARIO",
@@ -95,7 +104,7 @@ class EvidenceBoundaryJudgeTest {
              "scenario_label_position":"AFTER","violations":[]}
             """);
 
-        assertFalse(judge.review(
+        assertTrue(judge.review(
             minedStoryCase(),
             "有一个地主在春耕时遇到农会组织灌水，随后改变了态度。以上是假设。"
         ).safe());
@@ -116,7 +125,8 @@ class EvidenceBoundaryJudgeTest {
             "有一个地主在春耕时遇到农会组织灌水，随后改变了态度。");
 
         assertFalse(result.safe());
-        assertTrue(result.violations().stream().anyMatch(value -> value.contains("场景开始前")));
+        assertTrue(result.issues().stream().anyMatch(issue ->
+            issue.type() == EvidenceIssueType.UNLABELED_UNGROUNDED_SECTION));
     }
 
     @Test
@@ -143,20 +153,81 @@ class EvidenceBoundaryJudgeTest {
     @Test
     void strictSourceRejectsConstructedContentEvenWhenItIsLabeled() {
         EvidenceBoundaryJudge judge = judge("""
-            {"claims":[{"claim":"假设某店投入三万元",
-                         "classification":"PEDAGOGICAL_ILLUSTRATION",
-                         "reason":"这是证据外构造的教学例子"}],
+            {"claims":[{"claim":"某店投入三万元",
+                         "classification":"DISCLOSED_UNGROUNDED_CONTENT",
+                         "reason":"回答已声明内容由助手自主构造"}],
              "possible_scenario_present":true,
              "scenario_label_position":"BEFORE_OR_AT_FIRST","violations":[]}
             """);
         EvolutionEvalCase strictCase = withMode(commonExampleCase(), EvidenceUseMode.STRICT_SOURCE);
 
         EvidenceBoundaryJudge.EvidenceReview result =
-            judge.review(strictCase, "假设某店投入三万元。");
+            judge.review(strictCase,
+                "以下是助手自主回答内容，没有依据任何资料。某店投入三万元。");
 
         assertFalse(result.safe());
-        assertTrue(result.violations().stream().anyMatch(value ->
-            value.contains("严格来源模式不允许证据外构造内容")));
+        assertTrue(result.issues().stream().anyMatch(value ->
+            value.type() == EvidenceIssueType.STRICT_SOURCE_UNSUPPORTED_CONTENT));
+    }
+
+    @Test
+    void acceptsExplicitUpfrontAssistantGeneratedWithoutEvidenceDisclosure() {
+        EvidenceBoundaryJudge judge = judge("""
+            {"claims":[
+              {"claim":"地主陈满叔有八十亩田","classification":"UNSUPPORTED_FACTUAL_CLAIM",
+               "reason":"资料没有人物和田亩数字"},
+              {"claim":"他后来提着礼物申请入会","classification":"UNGROUNDED_DETAIL",
+               "reason":"资料没有具体行为"}
+             ],
+             "possible_scenario_present":true,
+             "scenario_label_position":"MISSING",
+             "violations":["想象细节没有前置标注"]}
+            """);
+
+        EvidenceBoundaryJudge.EvidenceReview result = judge.review(
+            minedStoryCase(),
+            "以下是助手自主回答内容，没依据任何内容，仅用于帮助理解。"
+                + "地主陈满叔有八十亩田，他后来提着礼物申请入会。");
+
+        assertTrue(result.safe());
+    }
+
+    @Test
+    void deterministicUpfrontPossibilityDisclosureOverridesModelPositionMistake() {
+        EvidenceBoundaryJudge judge = judge("""
+            {"claims":[{"claim":"他给影子起名并研究影子的速度",
+                         "classification":"UNSUPPORTED_FACTUAL_CLAIM",
+                         "reason":"证据没有这个细节"}],
+             "possible_scenario_present":true,
+             "scenario_label_position":"MISSING",
+             "violations":["模型认为没有前置声明"]}
+            """);
+
+        EvidenceBoundaryJudge.EvidenceReview result = judge.review(
+            minedStoryCase(),
+            "可以想象这样一个过程：他给影子起名并研究影子的速度，随后才逐渐认识真实事物。");
+
+        assertTrue(result.safe());
+    }
+
+    @Test
+    void disclosureCannotHideFalseSourceAttribution() {
+        EvidenceBoundaryJudge judge = judge("""
+            {"claims":[{"claim":"原文记载地主陈满叔有八十亩田",
+                         "classification":"DISCLOSED_UNGROUNDED_CONTENT",
+                         "reason":"回答开头声明无依据"}],
+             "possible_scenario_present":true,
+             "scenario_label_position":"BEFORE_OR_AT_FIRST","violations":[]}
+            """);
+
+        EvidenceBoundaryJudge.EvidenceReview result = judge.review(
+            minedStoryCase(),
+            "以下是助手自主回答内容，没有依据任何资料。"
+                + "原文记载地主陈满叔有八十亩田。");
+
+        assertFalse(result.safe());
+        assertTrue(result.issues().stream().anyMatch(issue ->
+            issue.type() == EvidenceIssueType.FALSE_SOURCE_ATTRIBUTION));
     }
 
     @Test
@@ -178,7 +249,8 @@ class EvidenceBoundaryJudgeTest {
     @Test
     void modelFailureMakesEvidenceReviewUnevaluated() {
         ModelClient modelClient = mock(ModelClient.class);
-        when(modelClient.chat(anyString()))
+        when(modelClient.chat(
+            anyString(), any(ModelClient.ChatOptions.class)))
             .thenThrow(new ModelClientException("timeout", 500, true));
         EvidenceBoundaryJudge judge =
             new EvidenceBoundaryJudge(modelClient, new ObjectMapper());
@@ -190,9 +262,84 @@ class EvidenceBoundaryJudgeTest {
         assertTrue(result.error().contains("timeout"));
     }
 
-    private EvidenceBoundaryJudge judge(String output) {
+    @Test
+    void semanticEntailmentReviewAcceptsEquivalentTheoreticalWording() {
+        EvidenceBoundaryJudge judge = judge("""
+            {"claims":[{"claim":"损失区的心理曲线斜率比收益区更陡",
+                         "classification":"UNSUPPORTED_FACTUAL_CLAIM",
+                         "reason":"证据没有使用斜率一词"}],
+             "possible_scenario_present":false,
+             "scenario_label_position":"NOT_APPLICABLE","violations":[]}
+            """, """
+            {"reviews":[{"index":0,"relation":"ENTAILED",
+                         "reason":"心理反应更强与曲线斜率更陡是语义等价表达"}]}
+            """);
+
+        EvolutionEvalCase evalCase = new EvalCaseGenerator()
+            .generate(List.of(), "u1", 1L, 1, 3).stream()
+            .filter(value -> value.expectedFailureType() == FailureType.TOO_SIMPLE)
+            .findFirst().orElseThrow();
+        EvidenceBoundaryJudge.EvidenceReview result = judge.review(
+            evalCase, "损失区的心理曲线斜率比收益区更陡。");
+
+        assertTrue(result.safe());
+        assertEquals("SUPPORTED_PARAPHRASE",
+            result.claims().get(0).classification());
+    }
+
+    @Test
+    void semanticEntailmentReviewKeepsUnsupportedExternalFactUnsafe() {
+        EvidenceBoundaryJudge judge = judge("""
+            {"claims":[{"claim":"某研究发现损失影响是收益的2.25倍",
+                         "classification":"UNSUPPORTED_FACTUAL_CLAIM",
+                         "reason":"证据没有研究和比例"}],
+             "possible_scenario_present":false,
+             "scenario_label_position":"NOT_APPLICABLE","violations":[]}
+            """, """
+            {"reviews":[{"index":0,"relation":"UNSUPPORTED_EXTERNAL_FACT",
+                         "reason":"新增具体研究和统计比例"}]}
+            """);
+        EvolutionEvalCase evalCase = new EvalCaseGenerator()
+            .generate(List.of(), "u1", 1L, 1, 3).stream()
+            .filter(value -> value.expectedFailureType() == FailureType.TOO_SIMPLE)
+            .findFirst().orElseThrow();
+
+        EvidenceBoundaryJudge.EvidenceReview result = judge.review(
+            evalCase, "某研究发现损失影响是收益的2.25倍。");
+
+        assertFalse(result.safe());
+        assertTrue(result.issues().stream().anyMatch(issue ->
+            issue.type() == EvidenceIssueType.UNSUPPORTED_FACTUAL_CLAIM));
+    }
+
+    @Test
+    void entailmentModelFailureMakesEvidenceReviewUnevaluated() {
         ModelClient modelClient = mock(ModelClient.class);
-        when(modelClient.chat(anyString())).thenReturn(output);
+        when(modelClient.chat(
+            anyString(), any(ModelClient.ChatOptions.class)))
+            .thenReturn("""
+                {"claims":[{"claim":"某研究发现影响是2.25倍",
+                             "classification":"UNSUPPORTED_FACTUAL_CLAIM",
+                             "reason":"证据没有研究比例"}],
+                 "possible_scenario_present":false,
+                 "scenario_label_position":"NOT_APPLICABLE","violations":[]}
+                """)
+            .thenThrow(new ModelClientException("entailment timeout", 500, true));
+        EvidenceBoundaryJudge judge =
+            new EvidenceBoundaryJudge(modelClient, new ObjectMapper());
+
+        EvidenceBoundaryJudge.EvidenceReview result =
+            judge.review(commonExampleCase(), "某研究发现影响是2.25倍。");
+
+        assertFalse(result.evaluated());
+        assertTrue(result.error().contains("entailment timeout"));
+    }
+
+    private EvidenceBoundaryJudge judge(String output, String... followingOutputs) {
+        ModelClient modelClient = mock(ModelClient.class);
+        when(modelClient.chat(
+            anyString(), any(ModelClient.ChatOptions.class)))
+            .thenReturn(output, followingOutputs);
         return new EvidenceBoundaryJudge(modelClient, new ObjectMapper());
     }
 

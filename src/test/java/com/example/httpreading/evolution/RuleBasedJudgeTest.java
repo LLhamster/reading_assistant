@@ -3,6 +3,7 @@ package com.example.httpreading.evolution;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -83,7 +84,13 @@ class RuleBasedJudgeTest {
 
     private RuleBasedJudge judge(String scoringOutput, String evidenceOutput) {
         ModelClient modelClient = mock(ModelClient.class);
-        when(modelClient.chat(anyString())).thenReturn(scoringOutput, evidenceOutput);
+        when(modelClient.chat(anyString())).thenReturn(scoringOutput);
+        when(modelClient.chat(
+            anyString(), any(ModelClient.ChatOptions.class)))
+            .thenReturn(evidenceOutput, """
+                {"reviews":[{"index":0,"relation":"UNSUPPORTED_EXTERNAL_FACT",
+                             "reason":"证据没有支持该真实事件"}]}
+                """);
         ObjectMapper objectMapper = new ObjectMapper();
         return new RuleBasedJudge(
             modelClient, objectMapper, new EvidenceBoundaryJudge(modelClient, objectMapper));

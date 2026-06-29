@@ -70,7 +70,27 @@ public class InProcessAgentEvaluator {
             "仅评测 FinalAnswer 输出质量",
             0,
             "直接生成最终回答",
-            input.answerGuidance());
+            evidenceModeGuidance(evalCase, input.answerGuidance()));
+    }
+
+    private String evidenceModeGuidance(EvolutionEvalCase evalCase, String guidance) {
+        EvidenceUseMode mode = evalCase.expectedBehavior().evidencePolicy().evidenceUseMode();
+        String modeRule = switch (mode) {
+            case STRICT_SOURCE ->
+                "evidenceUseMode=STRICT_SOURCE：只能依据测试证据，证据不足时直接说明，"
+                    + "免责声明不能替代证据。";
+            case SOURCE_GROUNDED_NARRATIVE ->
+                "evidenceUseMode=SOURCE_GROUNDED_NARRATIVE：如需证据外叙事，回答的第一个"
+                    + "非标题句必须是“以下为助手自主构造、没有资料依据，仅用于理解”。"
+                    + "该句之前不得出现人物、时间、地点、事件或事实判断；声明后立即进入故事。"
+                    + "不得把历史记忆摘要提升为原文、RAG 或书籍事实。";
+            case PEDAGOGICAL_ILLUSTRATION ->
+                "evidenceUseMode=PEDAGOGICAL_ILLUSTRATION：用于解释理论的教学人物、数字和"
+                    + "生活场景无需真实性声明，但不能冒充原文或真实事件。";
+        };
+        return (guidance == null || guidance.isBlank())
+            ? modeRule
+            : guidance + "\n" + modeRule;
     }
 
     private CollectedEvidence fixedEvidence(EvolutionEvalCase evalCase) {

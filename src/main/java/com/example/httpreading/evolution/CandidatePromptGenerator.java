@@ -21,6 +21,8 @@ public class CandidatePromptGenerator {
     private static final Pattern OVERBROAD_HYPOTHETICAL_LABEL =
         Pattern.compile("(?s)(?:所有|每个|任何).{0,16}(?:具体|数字|细节|例子).{0,24}"
             + "(?:逐项|分别|都必须).{0,16}(?:假设|标注)");
+    private static final Pattern ALLOWED_EVIDENCE_MODE = Pattern.compile(
+        "STRICT_SOURCE|SOURCE_GROUNDED_NARRATIVE|PEDAGOGICAL_ILLUSTRATION");
 
     private final ModelClient modelClient;
     private final ObjectMapper objectMapper;
@@ -36,7 +38,7 @@ public class CandidatePromptGenerator {
             return PromptOverride.none();
         }
         try {
-            String raw = modelClient.chat(prompt(failures, failedSamples(baselineResults)));
+            String raw = modelClient.chat(prompt(failures, summarizeFailures(baselineResults)));
             JsonNode json = objectMapper.readTree(extractJson(raw));
             if (!json.path("plannerPatch").asText("").isBlank()) {
                 throw new IllegalArgumentException("candidate output contains a Planner patch");
@@ -44,6 +46,7 @@ public class CandidatePromptGenerator {
             PromptOverride generated = PromptOverride.finalAnswerOnly(
                 json.path("finalAnswerPatch").asText(""));
             if (!generated.isEmpty()) {
+                generated = ensureEvidenceBoundaryRule(generated, failures);
                 validateGenerated(generated);
                 return generated;
             }
@@ -54,7 +57,7 @@ public class CandidatePromptGenerator {
     }
 
     private String prompt(Map<FailureType, Integer> failures,
-                          List<Map<String, Object>> failedSamples) throws Exception {
+                          Map<String, Object> failureSummary) throws Exception {
         return """
             你是一个通用 AI 回答 Prompt 的改进器。根据评测失败生成一个最小的行为策略 patch。
             该 patch 只会被追加到 FinalAnswer Prompt 的“可进化策略区”。
@@ -67,22 +70,30 @@ public class CandidatePromptGenerator {
             - 必须区分“历史/事实内容补写”和“解释理论的教学举例”：
               历史或真实事件的想象补写，应在整个场景开始前统一说明“可能、假设或用于理解”，
               一次说明覆盖连续场景，不要求每个细节重复标注，也不能冒充原文事实；
+              也可明确声明“以下为助手自主构造、没有资料依据、仅用于理解”；
               教学举例中的虚构人物、数字和生活场景不承担真实事件声明，无需真实性标签。
+            - 存在证据边界失败时，规则必须明确：在 SOURCE_GROUNDED_NARRATIVE 中，第一个非标题句
+              必须先声明“以下为助手自主构造、没有资料依据，仅用于理解”；该句之前不得出现人物、
+              时间、地点、事件或事实判断，声明之后立即进入故事。
+            - memory 可以称为“历史记忆摘要/之前记录”，但不能提升为原文、RAG 或书籍事实来源。
+            - STRICT_SOURCE 下必须删除证据外内容或说明证据不足，免责声明不能绕过严格来源要求。
             - 禁止生成“所有具体例子、每个数字或每个新增细节都必须逐项标注假设”的过度规则。
             - 只输出 JSON：{"finalAnswerPatch":"可为空"}
 
             failureCounts:
             %s
-            failedSamples:
+            aggregatedFailureSummary:
             %s
             """.formatted(
             objectMapper.writeValueAsString(failures),
-            objectMapper.writeValueAsString(failedSamples));
+            objectMapper.writeValueAsString(failureSummary));
     }
 
     private void validateGenerated(PromptOverride generated) {
         String patch = generated.finalAnswerPatch();
         String normalized = patch.toLowerCase();
+        String projectIdentifierCheck =
+            ALLOWED_EVIDENCE_MODE.matcher(patch).replaceAll("");
         if (!generated.plannerPatch().isBlank()
             || normalized.contains("planner")
             || normalized.contains("answerrequirement")
@@ -91,9 +102,28 @@ public class CandidatePromptGenerator {
             || patch.contains("修改固定")
             || patch.contains("修改输出格式")
             || OVERBROAD_HYPOTHETICAL_LABEL.matcher(patch).find()
-            || INTERNAL_IDENTIFIER.matcher(patch).find()) {
+            || INTERNAL_IDENTIFIER.matcher(projectIdentifierCheck).find()) {
             throw new IllegalArgumentException("candidate patch attempts to modify a fixed or project-specific contract");
         }
+    }
+
+    private PromptOverride ensureEvidenceBoundaryRule(
+        PromptOverride generated,
+        Map<FailureType, Integer> failures) {
+        if (!failures.containsKey(FailureType.EVIDENCE_BOUNDARY)) {
+            return generated;
+        }
+        String patch = generated.finalAnswerPatch();
+        if (patch.contains("第一个非标题句")
+            && patch.contains("以下为助手自主构造、没有资料依据，仅用于理解")) {
+            return generated;
+        }
+        String requiredRule = "在 SOURCE_GROUNDED_NARRATIVE 中如需证据外补写，"
+            + "回答的第一个非标题句必须是“以下为助手自主构造、没有资料依据，仅用于理解”。"
+            + "该句之前不得出现人物、时间、地点、事件或事实判断；声明之后立即进入故事。"
+            + "历史记忆摘要只能标为 memory/之前记录，不能提升为原文、RAG 或书籍事实。";
+        return PromptOverride.finalAnswerOnly(
+            patch.isBlank() ? requiredRule : patch + "\n" + requiredRule);
     }
 
     private Map<FailureType, Integer> failureCounts(List<EvolutionCaseResult> results) {
@@ -110,18 +140,54 @@ public class CandidatePromptGenerator {
         return counts;
     }
 
-    private List<Map<String, Object>> failedSamples(List<EvolutionCaseResult> results) {
-        List<Map<String, Object>> samples = new java.util.ArrayList<>();
-        for (EvolutionCaseResult result : results == null ? List.<EvolutionCaseResult>of() : results) {
-            if (result.passed()) continue;
+    Map<String, Object> summarizeFailures(List<EvolutionCaseResult> results) {
+        List<EvolutionCaseResult> failed = (results == null
+            ? List.<EvolutionCaseResult>of()
+            : results).stream().filter(result -> !result.passed()).toList();
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("totalFailedCases", failed.size());
+
+        List<Map<String, Object>> content = new java.util.ArrayList<>();
+        for (FailureType type : FailureType.values()) {
+            List<EvolutionCaseResult> matching = failed.stream()
+                .filter(result -> result.failureTypes().contains(type))
+                .toList();
+            if (matching.isEmpty()
+                || type == FailureType.EVIDENCE_BOUNDARY
+                || type == FailureType.EVALUATION_ERROR
+                || type == FailureType.EMPTY_OR_MODEL_ERROR) {
+                continue;
+            }
             Map<String, Object> item = new LinkedHashMap<>();
-            item.put("caseId", result.caseId());
-            item.put("failureTypes", result.failureTypes());
-            item.put("judgeReasons", result.reasons());
-            samples.add(item);
-            if (samples.size() == 10) break;
+            item.put("failureType", type);
+            item.put("count", matching.size());
+            item.put("representativeReasons", matching.stream()
+                .flatMap(result -> result.reasons().stream())
+                .filter(reason -> !reason.startsWith("证据边界："))
+                .distinct().limit(2).toList());
+            content.add(item);
         }
-        return List.copyOf(samples);
+        summary.put("contentFailures", content);
+
+        List<Map<String, Object>> evidence = new java.util.ArrayList<>();
+        for (EvidenceIssueType type : EvidenceIssueType.values()) {
+            List<EvidenceIssue> matching = failed.stream()
+                .flatMap(result -> result.evidenceIssues().stream())
+                .filter(issue -> issue.type() == type)
+                .toList();
+            if (matching.isEmpty()) continue;
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("issueType", type);
+            item.put("count", matching.stream().mapToInt(EvidenceIssue::count).sum());
+            item.put("summary", matching.get(0).summary());
+            item.put("correction", matching.get(0).correction());
+            item.put("representativeExamples", matching.stream()
+                .flatMap(issue -> issue.examples().stream())
+                .distinct().limit(2).toList());
+            evidence.add(item);
+        }
+        summary.put("evidenceFailures", evidence);
+        return Map.copyOf(summary);
     }
 
     private PromptOverride deterministicPatch(Map<FailureType, Integer> failures) {
@@ -145,8 +211,10 @@ public class CandidatePromptGenerator {
             finalRules.add("首段先给出问题的核心结论，后续内容必须围绕该问题展开。");
         }
         if (failures.containsKey(FailureType.EVIDENCE_BOUNDARY)) {
-            finalRules.add("历史或事实语境中的想象补写，在整个连续场景开始前统一说明“可能、假设或用于理解”，"
-                + "并且不能归因成原文事实；用于解释理论的教学例子无需声明真实性，也不要求逐项标注。");
+            finalRules.add("在 SOURCE_GROUNDED_NARRATIVE 中如需证据外补写，回答的第一个非标题句"
+                + "必须是“以下为助手自主构造、没有资料依据，仅用于理解”。该句之前不得出现人物、"
+                + "时间、地点、事件或事实判断；声明之后立即进入故事。STRICT_SOURCE 必须删除证据外"
+                + "内容；教学例子无需声明真实性。历史记忆摘要不能提升为原文、RAG 或书籍事实。");
         }
         return PromptOverride.finalAnswerOnly(String.join("\n", finalRules));
     }

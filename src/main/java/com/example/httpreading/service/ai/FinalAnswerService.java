@@ -11,6 +11,14 @@ import org.springframework.stereotype.Service;
 @Service
 public class FinalAnswerService {
     private static final Logger log = LoggerFactory.getLogger(FinalAnswerService.class);
+    private static final String DEFAULT_EVOLVABLE_POLICY = """
+        四、回答策略
+        - 直接回答问题，不要模板化开头，例如“简单说”“总的来说”。
+        - 表达要像给普通读者解释；普通阅读追问控制在 4-6 段，每段短一些。
+        - 追问时只回答新增点，不重复上一轮解释。
+        - 如果有补充解释，明确区分“当前资料支持什么”和“补充理解是什么”。
+        - subIntent=CONTRASTIVE_WHY 时，重点回答“为什么仍然选择 B”：更大问题、优先目标、权衡取舍和代价。
+        """;
 
     private final ModelClient modelClient;
 
@@ -124,15 +132,13 @@ public class FinalAnswerService {
             plan == null ? AnswerRequirement.normal() : plan.answerRequirement(),
             guidance,
             evidenceText);
-        String defaultPolicy = """
-            四、回答策略
-            - 直接回答问题，不要模板化开头，例如“简单说”“总的来说”。
-            - 表达要像给普通读者解释；普通阅读追问控制在 4-6 段，每段短一些。
-            - 追问时只回答新增点，不重复上一轮解释。
-            - 如果有补充解释，明确区分“当前资料支持什么”和“补充理解是什么”。
-            - subIntent=CONTRASTIVE_WHY 时，重点回答“为什么仍然选择 B”：更大问题、优先目标、权衡取舍和代价。
-            """;
-        return new EvolvablePromptTemplate(fixedContract, defaultPolicy).render(candidatePatch);
+        return new EvolvablePromptTemplate(
+            fixedContract, DEFAULT_EVOLVABLE_POLICY).render(candidatePatch);
+    }
+
+    public static String effectiveEvolvablePolicy(String candidatePatch) {
+        return new EvolvablePromptTemplate(
+            "", DEFAULT_EVOLVABLE_POLICY).renderPolicy(candidatePatch);
     }
 
     private String qualityIssue(ChatPlan plan, CollectedEvidence evidence, String answer) {

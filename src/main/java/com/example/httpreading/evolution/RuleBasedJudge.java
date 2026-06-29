@@ -81,7 +81,8 @@ public class RuleBasedJudge {
         evidenceReview.violations().forEach(value -> reasons.add("证据边界：" + value));
 
         return result(evalCase, run, score, passed, hardFailure,
-            failures.stream().distinct().toList(), reasons);
+            failures.stream().distinct().toList(), reasons,
+            evidenceReview.issues(), evidenceReview.claims());
     }
 
     private JudgeScore judgeWithModel(EvolutionEvalCase evalCase,
@@ -183,9 +184,23 @@ public class RuleBasedJudge {
                                        boolean hardFailure,
                                        List<FailureType> failures,
                                        List<String> reasons) {
+        return result(evalCase, run, score, passed, hardFailure, failures, reasons,
+            List.of(), List.of());
+    }
+
+    private EvolutionCaseResult result(EvolutionEvalCase evalCase,
+                                       InProcessAgentEvaluator.AgentRun run,
+                                       double score,
+                                       boolean passed,
+                                       boolean hardFailure,
+                                       List<FailureType> failures,
+                                       List<String> reasons,
+                                       List<EvidenceIssue> evidenceIssues,
+                                       List<EvidenceBoundaryJudge.ClaimReview> evidenceClaims) {
         return new EvolutionCaseResult(
             evalCase.id(), run.answer(), run.status(), run.plan(), score,
-            passed, hardFailure, failures, reasons, run.latencyMs());
+            passed, hardFailure, failures, reasons, evidenceIssues, evidenceClaims,
+            run.latencyMs());
     }
 
     private JsonNode parseObject(String raw) throws Exception {

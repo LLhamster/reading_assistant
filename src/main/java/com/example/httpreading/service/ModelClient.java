@@ -40,10 +40,15 @@ public class ModelClient {
     private String dashscopeEmbeddingModel;
 
     public String chat(String question) {
+        return chat(question, ChatOptions.defaults());
+    }
+
+    public String chat(String question, ChatOptions options) {
+        ChatOptions resolvedOptions = options == null ? ChatOptions.defaults() : options;
         ModelClientException lastException = null;
         for (int attempt = 1; attempt <= MAX_CHAT_ATTEMPTS; attempt++) {
             try {
-                return doChat(question, attempt);
+                return doChat(question, attempt, resolvedOptions);
             } catch (ModelClientException exception) {
                 lastException = exception;
                 if (!exception.retryable() || attempt >= MAX_CHAT_ATTEMPTS) {
@@ -57,7 +62,7 @@ public class ModelClient {
             : lastException;
     }
 
-    private String doChat(String question, int attempt) {
+    private String doChat(String question, int attempt, ChatOptions options) {
         try {
             JSONObject root = new JSONObject();
             root.put("model", chatModel());
@@ -68,6 +73,9 @@ public class ModelClient {
             messages.put(userMsg);
             root.put("messages", messages);
             root.put("stream", false);
+            if (options.temperature() != null) {
+                root.put("temperature", options.temperature());
+            }
 
             MediaType mediaType = MediaType.parse("application/json");
             RequestBody body = RequestBody.create(mediaType, root.toString());
@@ -256,6 +264,22 @@ public class ModelClient {
         } catch (IOException e) {
             e.printStackTrace();
             return new ArrayList<>();
+        }
+    }
+
+    public record ChatOptions(Double temperature) {
+        public ChatOptions {
+            if (temperature != null && (temperature < 0.0 || temperature > 2.0)) {
+                throw new IllegalArgumentException("temperature must be between 0 and 2");
+            }
+        }
+
+        public static ChatOptions defaults() {
+            return new ChatOptions(null);
+        }
+
+        public static ChatOptions deterministic() {
+            return new ChatOptions(0.0);
         }
     }
 }

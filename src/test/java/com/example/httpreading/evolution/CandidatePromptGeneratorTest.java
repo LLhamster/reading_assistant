@@ -1,5 +1,6 @@
 package com.example.httpreading.evolution;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -7,6 +8,8 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.IntStream;
 
 import com.example.httpreading.service.ModelClient;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -71,5 +74,55 @@ class CandidatePromptGeneratorTest {
 
         assertFalse(patch.finalAnswerPatch().contains("每个数字都必须逐项标注"));
         assertTrue(patch.finalAnswerPatch().contains("教学例子无需声明真实性"));
+    }
+
+    @Test
+    void summarizesAllFailuresAndKeepsOnlyTwoRepresentativeEvidenceExamples() {
+        CandidatePromptGenerator generator =
+            new CandidatePromptGenerator(mock(ModelClient.class), new ObjectMapper());
+        List<EvolutionCaseResult> failures = IntStream.range(0, 15)
+            .mapToObj(index -> new EvolutionCaseResult(
+                "c" + index, "回答", "completed", null, 0.49,
+                false, true,
+                List.of(FailureType.MISSING_STORY_DETAIL, FailureType.EVIDENCE_BOUNDARY),
+                List.of("内容评分项 complete_story：故事不完整"),
+                List.of(new EvidenceIssue(
+                    EvidenceIssueType.UNLABELED_UNGROUNDED_SECTION,
+                    "历史场景缺少前置声明", 1,
+                    List.of("无依据细节-" + index),
+                    "把声明移到场景开始前")),
+                List.of(), 1))
+            .toList();
+
+        Map<String, Object> summary = generator.summarizeFailures(failures);
+
+        assertEquals(15, summary.get("totalFailedCases"));
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> evidence =
+            (List<Map<String, Object>>) summary.get("evidenceFailures");
+        assertEquals(15, evidence.get(0).get("count"));
+        assertEquals(2,
+            ((List<?>) evidence.get(0).get("representativeExamples")).size());
+    }
+
+    @Test
+    void acceptsGenericEvidenceModeNamesAndAddsVerifiableOpeningRule() {
+        ModelClient modelClient = mock(ModelClient.class);
+        when(modelClient.chat(anyString())).thenReturn("""
+            {"finalAnswerPatch":"SOURCE_GROUNDED_NARRATIVE 允许前置声明；STRICT_SOURCE 只能使用证据；PEDAGOGICAL_ILLUSTRATION 允许教学举例。"}
+            """);
+        CandidatePromptGenerator generator =
+            new CandidatePromptGenerator(modelClient, new ObjectMapper());
+        EvolutionCaseResult failed = new EvolutionCaseResult(
+            "c1", "历史回答", "completed", null, 0.49,
+            false, true, List.of(FailureType.EVIDENCE_BOUNDARY),
+            List.of("历史场景缺少前置声明"), 1);
+
+        PromptOverride patch = generator.generate(List.of(failed));
+
+        assertTrue(patch.finalAnswerPatch().contains("STRICT_SOURCE"));
+        assertTrue(patch.finalAnswerPatch().contains("第一个非标题句"));
+        assertTrue(patch.finalAnswerPatch()
+            .contains("以下为助手自主构造、没有资料依据，仅用于理解"));
     }
 }

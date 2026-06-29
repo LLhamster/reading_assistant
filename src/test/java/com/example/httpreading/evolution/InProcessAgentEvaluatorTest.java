@@ -45,9 +45,37 @@ class InProcessAgentEvaluatorTest {
         assertEquals(requests.getAllValues().get(0).resolvedSessionId(),
             requests.getAllValues().get(1).resolvedSessionId());
         assertEquals(plans.getAllValues().get(0), plans.getAllValues().get(1));
+        assertTrue(plans.getAllValues().get(0).answerGuidance()
+            .contains("evidenceUseMode=PEDAGOGICAL_ILLUSTRATION"));
         assertEquals(evidence.getAllValues().get(0), evidence.getAllValues().get(1));
         assertTrue(overrides.getAllValues().get(0).isEmpty());
         assertTrue(overrides.getAllValues().get(1).plannerPatch().isBlank());
         assertEquals("先给具体场景", overrides.getAllValues().get(1).finalAnswerPatch());
+    }
+
+    @Test
+    void sourceGroundedNarrativeReceivesExactFirstNonTitleSentenceConstraint() {
+        FinalAnswerService finalAnswerService = mock(FinalAnswerService.class);
+        when(finalAnswerService.answer(
+            any(AiChatRequest.class), any(ChatPlan.class),
+            any(CollectedEvidence.class), any(PromptOverride.class)))
+            .thenReturn("最终回答");
+        InProcessAgentEvaluator evaluator = new InProcessAgentEvaluator(finalAnswerService);
+        EvolutionEvalCase evalCase = new EvalCaseGenerator()
+            .generate(List.of(), "u1", 1L, 1, 6).stream()
+            .filter(value -> value.expectedBehavior().evidencePolicy().evidenceUseMode()
+                == EvidenceUseMode.SOURCE_GROUNDED_NARRATIVE)
+            .findFirst().orElseThrow();
+
+        evaluator.evaluate(List.of(evalCase), "candidate",
+            PromptOverride.finalAnswerOnly("候选策略"));
+
+        ArgumentCaptor<ChatPlan> plans = ArgumentCaptor.forClass(ChatPlan.class);
+        verify(finalAnswerService).answer(
+            any(AiChatRequest.class), plans.capture(),
+            any(CollectedEvidence.class), any(PromptOverride.class));
+        assertTrue(plans.getValue().answerGuidance().contains("第一个非标题句必须是"));
+        assertTrue(plans.getValue().answerGuidance()
+            .contains("以下为助手自主构造、没有资料依据，仅用于理解"));
     }
 }

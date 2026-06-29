@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import com.example.httpreading.service.ai.FinalAnswerService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
 import org.springframework.stereotype.Component;
@@ -84,6 +85,7 @@ public class SelfEvolutionReportWriter {
             .append("- user: ").append(report.userId()).append('\n')
             .append("- signals: ").append(report.signals().size()).append('\n')
             .append("- eval cases: ").append(report.evalCases().size()).append('\n')
+            .append("- evolution strategy: BATCH_AGGREGATE\n")
             .append("- baseline score: ").append(format(report.baseline().averageScore())).append('\n')
             .append("- baseline pass rate: ").append(format(report.baseline().passRate())).append('\n')
             .append("- candidate evaluated: ").append(!report.candidateResults().isEmpty()).append('\n');
@@ -100,6 +102,12 @@ public class SelfEvolutionReportWriter {
             .append("## Candidate FinalAnswer Evolvable Patch\n\n")
             .append("固定契约未修改；以下内容仅追加到 FinalAnswer 的可进化策略区。\n\n```text\n")
             .append(report.candidatePrompt().finalAnswerPatch()).append("\n```\n\n")
+            .append("## Effective FinalAnswer Evolvable Policy\n\n")
+            .append("以下是默认可进化策略追加候选 patch 后，本轮 candidate 实际使用的完整策略区。")
+            .append("\n\n```text\n")
+            .append(FinalAnswerService.effectiveEvolvablePolicy(
+                report.candidatePrompt().finalAnswerPatch()))
+            .append("\n```\n\n")
             .append("## Failed Case Comparison\n\n");
         for (int index = 0; index < report.evalCases().size(); index++) {
             EvolutionCaseResult baseline = report.baselineResults().get(index);
@@ -160,17 +168,36 @@ public class SelfEvolutionReportWriter {
             text.append('\n');
         }
         text.append("**证据边界原因**：\n\n");
-        List<String> evidenceReasons = result.reasons().stream()
-            .filter(reason -> reason.startsWith("证据边界："))
-            .toList();
-        if (evidenceReasons.isEmpty()) {
-            text.append("- 无\n\n");
-        } else {
-            for (String reason : evidenceReasons) {
-                text.append("- ").append(reason.substring("证据边界：".length()).replace('\n', ' '))
-                    .append('\n');
+        if (!result.evidenceIssues().isEmpty()) {
+            for (EvidenceIssue issue : result.evidenceIssues()) {
+                text.append("- `").append(issue.type()).append("`（")
+                    .append(issue.count()).append(" 处）：")
+                    .append(issue.summary().replace('\n', ' ')).append('\n')
+                    .append("  - 如何修改：")
+                    .append(issue.correction().replace('\n', ' ')).append('\n');
+                if (!issue.examples().isEmpty()) {
+                    text.append("  - 代表例子：")
+                        .append(issue.examples().stream()
+                            .map(value -> "“" + truncate(value.replace('\n', ' '), 180) + "”")
+                            .collect(Collectors.joining("；")))
+                        .append('\n');
+                }
             }
             text.append('\n');
+        } else {
+            List<String> evidenceReasons = result.reasons().stream()
+                .filter(reason -> reason.startsWith("证据边界："))
+                .toList();
+            if (evidenceReasons.isEmpty()) {
+                text.append("- 无\n\n");
+            } else {
+                for (String reason : evidenceReasons) {
+                    text.append("- ")
+                        .append(reason.substring("证据边界：".length()).replace('\n', ' '))
+                        .append('\n');
+                }
+                text.append('\n');
+            }
         }
         List<String> evaluationErrors = result.reasons().stream()
             .filter(reason -> reason.startsWith("评测器错误："))
