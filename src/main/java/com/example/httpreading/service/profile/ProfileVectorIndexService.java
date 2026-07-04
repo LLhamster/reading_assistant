@@ -121,6 +121,20 @@ public class ProfileVectorIndexService {
             evidence.getContent(), metadata);
     }
 
+    public boolean deleteEvidenceVector(ProfileGrowthEvidence evidence) {
+        if (evidence == null || evidence.getId() == null) {
+            return true;
+        }
+        String vectorId = "profile_evidence:" + evidence.getId();
+        boolean deleted = qdrantStore.deleteVectors(List.of(vectorId));
+        mappingRepository.findBySourceTableAndSourceId("profile_growth_evidence", evidence.getId())
+            .ifPresent(mapping -> {
+                mapping.setStatus("deleted");
+                mappingRepository.save(mapping);
+            });
+        return deleted;
+    }
+
     public ProfileSearchResult searchRelevant(String userId,
                                               String query,
                                               int topK,

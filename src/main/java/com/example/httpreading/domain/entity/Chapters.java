@@ -52,6 +52,9 @@ public class Chapters {
     @Column(name = "volume_title")
     private String volumeTitle;
 
+    @Column(name = "hierarchy_level")
+    private Integer hierarchyLevel;
+
     // getter / setter
     public String getContentFilePath() {
         return contentFilePath;
@@ -93,6 +96,14 @@ public class Chapters {
 
     public void setVolumeTitle(String volumeTitle) {
         this.volumeTitle = volumeTitle;
+    }
+
+    public Integer getHierarchyLevel() {
+        return hierarchyLevel;
+    }
+
+    public void setHierarchyLevel(Integer hierarchyLevel) {
+        this.hierarchyLevel = hierarchyLevel;
     }
 
     public Long getId() {

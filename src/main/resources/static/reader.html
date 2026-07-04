@@ -4,19 +4,38 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>信息阅读器</title>
+  <script>
+    try {
+      document.documentElement.dataset.theme = localStorage.getItem('readerTheme') || 'day';
+    } catch (_) {
+      document.documentElement.dataset.theme = 'day';
+    }
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-primary: #faf9f7;
-      --bg-secondary: #ffffff;
-      --bg-tertiary: #f5f3f0;
-      --text-primary: #1a1a1a;
-      --text-secondary: #6b6b6b;
-      --text-muted: #999999;
-      --accent: #c45d3a;
-      --accent-light: #f8ebe7;
-      --border: #e8e6e3;
+      color-scheme: light;
+      --bg-primary: #f2efe8;
+      --bg-secondary: #faf8f3;
+      --bg-tertiary: #ece8df;
+      --text-primary: #292722;
+      --text-secondary: #676159;
+      --text-muted: #918a80;
+      --accent: #b85b3b;
+      --accent-hover: #9f4d32;
+      --accent-light: #f3e3dc;
+      --border: #ddd7cc;
+      --floating-bg: #f7f2e9;
+      --floating-text: #37322c;
+      --floating-border: rgba(55,50,44,0.14);
+      --floating-hover: rgba(84,70,56,0.08);
+      --meta-bg: rgba(250,248,243,0.82);
+      --error-bg: #f8e9e4;
+      --error-text: #93432e;
+      --error-border: #e9c1b5;
+      --success-bg: #edf4ee;
+      --success-border: #cbdccb;
       --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
       --shadow-md: 0 4px 12px rgba(0,0,0,0.06);
       --shadow-lg: 0 12px 32px rgba(0,0,0,0.08);
@@ -24,7 +43,43 @@
       --content-max: 1680px;
     }
 
+    :root[data-theme="dark"] {
+      color-scheme: dark;
+      --bg-primary: #171816;
+      --bg-secondary: #20211f;
+      --bg-tertiary: #292a27;
+      --text-primary: #ddd9cf;
+      --text-secondary: #aaa59b;
+      --text-muted: #7f7b73;
+      --accent: #c87554;
+      --accent-hover: #d78360;
+      --accent-light: rgba(200,117,84,0.16);
+      --border: #393a36;
+      --floating-bg: #2b2c29;
+      --floating-text: #e0dcd2;
+      --floating-border: rgba(255,255,255,0.13);
+      --floating-hover: rgba(255,255,255,0.08);
+      --meta-bg: rgba(38,39,36,0.86);
+      --error-bg: #362520;
+      --error-text: #dda48e;
+      --error-border: #664137;
+      --success-bg: #243229;
+      --success-border: #3c5844;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
+      --shadow-md: 0 5px 16px rgba(0,0,0,0.24);
+      --shadow-lg: 0 14px 38px rgba(0,0,0,0.32);
+    }
+
     * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    * {
+      scrollbar-color: var(--text-muted) transparent;
+    }
+
+    ::selection {
+      background: var(--accent-light);
+      color: var(--text-primary);
+    }
 
     body {
       font-family: 'DM Sans', -apple-system, sans-serif;
@@ -32,7 +87,15 @@
       color: var(--text-primary);
       line-height: 1.6;
       min-height: 100vh;
+      transition: background-color 0.22s ease, color 0.22s ease;
     }
+
+    input, textarea, select {
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+    }
+
+    input::placeholder, textarea::placeholder { color: var(--text-muted); }
 
     h1, h2, h3, h4 {
       font-family: 'Cormorant Garamond', Georgia, serif;
@@ -181,7 +244,7 @@
     }
 
     .btn-primary:hover {
-      background: #a84d2f;
+      background: var(--accent-hover);
       transform: translateY(-1px);
     }
 
@@ -191,7 +254,7 @@
     }
 
     .btn-secondary:hover {
-      background: #ebe9e6;
+      background: var(--border);
     }
 
     /* ========== 新闻网格 ========== */
@@ -721,6 +784,11 @@
       cursor: pointer;
     }
 
+    .reader-style-toolbar .theme-toggle {
+      margin-left: auto;
+      min-width: 82px;
+    }
+
     .reader-content {
       font-size: 16px;
       line-height: 2;
@@ -790,6 +858,149 @@
       padding: 6px 10px;
     }
 
+    .reading-highlight {
+      --mark-color: #d3a800;
+      --mark-bg: rgba(247, 211, 80, 0.42);
+      border-radius: 2px;
+      padding: 0 1px;
+      cursor: pointer;
+      transition: filter 0.2s, box-shadow 0.2s;
+    }
+
+    .reading-highlight[data-color="green"] { --mark-color: #269766; --mark-bg: rgba(93, 190, 137, 0.36); }
+    .reading-highlight[data-color="blue"] { --mark-color: #267bcc; --mark-bg: rgba(79, 149, 234, 0.32); }
+    .reading-highlight[data-color="red"] { --mark-color: #c94242; --mark-bg: rgba(230, 92, 92, 0.3); }
+    .reading-highlight.mark-highlight { background: var(--mark-bg); }
+    .reading-highlight.mark-underline {
+      padding: 0;
+      border-radius: 0;
+      background: transparent;
+      text-decoration: underline solid var(--mark-color) 2px;
+      text-underline-offset: 0.2em;
+    }
+    .reading-highlight.mark-wavy {
+      padding: 0;
+      border-radius: 0;
+      background: transparent;
+      text-decoration: underline wavy var(--mark-color) 1.5px;
+      text-underline-offset: 0.2em;
+    }
+    .reading-highlight.has-note {
+      padding: 0;
+      border-radius: 0;
+      background: transparent;
+      text-decoration-line: underline;
+      text-decoration-style: dashed;
+      text-decoration-color: var(--accent);
+      text-decoration-thickness: 1.5px;
+      text-underline-offset: 0.22em;
+    }
+    .reading-highlight.annotation-focus {
+      box-shadow: 0 0 0 3px rgba(196, 93, 58, 0.35);
+      filter: saturate(1.25);
+    }
+
+    .annotation-toolbar {
+      position: fixed;
+      z-index: 220;
+      display: none;
+      align-items: center;
+      padding: 5px;
+      border: 1px solid var(--floating-border);
+      border-radius: 9px;
+      background: var(--floating-bg);
+      box-shadow: var(--shadow-lg);
+    }
+
+    .annotation-toolbar.active { display: flex; }
+    .annotation-toolbar-main {
+      display: flex;
+      align-items: center;
+    }
+    .annotation-action {
+      border: 0;
+      border-radius: 6px;
+      padding: 7px 13px;
+      background: transparent;
+      color: var(--floating-text);
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    .annotation-action + .annotation-action {
+      border-left: 1px solid var(--floating-border);
+      border-radius: 0 6px 6px 0;
+    }
+    .annotation-action:hover {
+      background: var(--floating-hover);
+    }
+
+    .annotation-mark-picker {
+      display: none;
+      align-items: center;
+      gap: 7px;
+      padding: 7px 7px 5px;
+      border-top: 1px solid var(--floating-border);
+    }
+    .annotation-toolbar.picking {
+      align-items: stretch;
+      flex-direction: column;
+    }
+    .annotation-toolbar.picking .annotation-mark-picker { display: flex; }
+    .annotation-style-choice,
+    .annotation-picker-save {
+      height: 28px;
+      min-width: 30px;
+      padding: 0 7px;
+      border: 1px solid var(--floating-border);
+      border-radius: 5px;
+      background: transparent;
+      color: var(--floating-text);
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .annotation-style-choice.active {
+      border-color: var(--accent);
+      background: var(--accent-light);
+    }
+    .annotation-style-choice.underline-demo { text-decoration: underline solid 2px; text-underline-offset: 3px; }
+    .annotation-style-choice.wavy-demo { text-decoration: underline wavy 1.5px; text-underline-offset: 3px; }
+    .annotation-picker-color {
+      width: 22px;
+      height: 22px;
+      border: 2px solid transparent;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    .annotation-picker-color[data-color="yellow"] { background: #e5bd20; }
+    .annotation-picker-color[data-color="green"] { background: #3caf7b; }
+    .annotation-picker-color[data-color="blue"] { background: #338bdc; }
+    .annotation-picker-color[data-color="red"] { background: #d74b4b; }
+    .annotation-picker-color.active { border-color: var(--floating-text); box-shadow: 0 0 0 1px rgba(0,0,0,.28); }
+    .annotation-picker-save {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .annotation-editor-mark-options {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .annotation-editor-mark-options .annotation-style-choice {
+      color: var(--text-secondary);
+      border-color: var(--border);
+    }
+    .annotation-editor-mark-options .annotation-style-choice.active {
+      color: var(--accent);
+      border-color: var(--accent);
+      background: var(--accent-light);
+    }
+
     /* ========== AI阅读侧栏 ========== */
     .ai-panel {
       background: var(--bg-secondary);
@@ -809,6 +1020,221 @@
       padding: 20px;
       border-bottom: 1px solid var(--border);
       background: var(--bg-secondary);
+    }
+
+    .ai-panel-tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .ai-panel-tab {
+      border: 0;
+      padding: 10px;
+      background: var(--bg-tertiary);
+      color: var(--text-muted);
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
+    }
+
+    .ai-panel-tab.active {
+      color: var(--accent);
+      background: var(--bg-secondary);
+      box-shadow: inset 0 -2px var(--accent);
+    }
+
+    .ai-agent-pane,
+    .annotation-pane {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .annotation-pane[hidden],
+    .ai-agent-pane[hidden] { display: none; }
+
+    .annotation-filter {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .annotation-filter button {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 4px 12px;
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      cursor: pointer;
+    }
+
+    .annotation-filter button.active {
+      color: white;
+      border-color: var(--accent);
+      background: var(--accent);
+    }
+
+    .annotation-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 14px;
+    }
+
+    .annotation-item {
+      padding: 12px;
+      margin-bottom: 10px;
+      border: 1px solid var(--border);
+      border-left: 4px solid #f5d34f;
+      border-radius: 10px;
+      background: var(--bg-secondary);
+      cursor: pointer;
+    }
+    .annotation-item[data-color="green"] { border-left-color: #3caf7b; }
+    .annotation-item[data-color="blue"] { border-left-color: #338bdc; }
+    .annotation-item[data-color="red"] { border-left-color: #d74b4b; }
+    .annotation-item.has-note {
+      border-left-color: var(--accent);
+      border-left-style: dashed;
+    }
+    .annotation-item.orphaned { opacity: 0.72; }
+    .annotation-item-quote {
+      color: var(--text-secondary);
+      font-size: 12px;
+      line-height: 1.6;
+      overflow-wrap: anywhere;
+    }
+    .annotation-item-note {
+      margin-top: 8px;
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .annotation-item-meta {
+      margin-top: 8px;
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+    .annotation-empty {
+      padding: 30px 12px;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 13px;
+    }
+
+    .annotation-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 250;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(0,0,0,0.38);
+    }
+    .annotation-overlay.active { display: flex; }
+    .annotation-editor {
+      width: min(520px, 100%);
+      padding: 22px;
+      border-radius: 14px;
+      background: var(--bg-secondary);
+      box-shadow: var(--shadow-lg);
+    }
+    .annotation-editor h3 { margin-bottom: 10px; }
+    .annotation-editor-quote {
+      max-height: 120px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+      padding: 10px;
+      border-left: 3px solid var(--accent);
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      font-size: 12px;
+    }
+    .annotation-editor textarea {
+      width: 100%;
+      min-height: 130px;
+      resize: vertical;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font: inherit;
+    }
+    .annotation-editor-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .annotation-editor-actions .danger {
+      margin-right: auto;
+      color: #b33b3b;
+    }
+
+    .reading-dialog-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 280;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(0,0,0,0.5);
+      backdrop-filter: blur(2px);
+    }
+    .reading-dialog-overlay.active { display: flex; }
+    .reading-dialog {
+      width: min(390px, 100%);
+      padding: 24px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      box-shadow: 0 18px 54px rgba(0,0,0,0.22);
+      animation: readingDialogIn 0.16s ease-out;
+    }
+    @keyframes readingDialogIn {
+      from { opacity: 0; transform: translateY(8px) scale(0.98); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .reading-dialog h3 {
+      margin: 0 0 10px;
+      font-family: inherit;
+      font-size: 18px;
+    }
+    .reading-dialog p {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+    .reading-dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 24px;
+    }
+    .reading-dialog-actions button {
+      min-width: 76px;
+      padding: 9px 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg-tertiary);
+      color: var(--text-secondary);
+      cursor: pointer;
+      font: inherit;
+    }
+    .reading-dialog-actions .confirm {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+    .reading-dialog-actions .confirm.danger {
+      border-color: #b94a3a;
+      background: #b94a3a;
     }
 
     .ai-title-row {
@@ -932,7 +1358,7 @@
 
     .ai-bubble strong {
       font-weight: 700;
-      color: #111;
+      color: var(--text-primary);
     }
 
     .ai-bubble ul,
@@ -960,15 +1386,15 @@
     }
 
     .ai-message.error .ai-bubble {
-      background: #fff3f0;
-      color: #9b3d24;
-      border: 1px solid #f1c4b7;
+      background: var(--error-bg);
+      color: var(--error-text);
+      border: 1px solid var(--error-border);
     }
 
     .ai-message.system .ai-bubble {
-      background: #f7fbf8;
+      background: var(--success-bg);
       color: var(--text-primary);
-      border: 1px solid #cfe8d5;
+      border: 1px solid var(--success-border);
       border-bottom-left-radius: 4px;
     }
 
@@ -978,7 +1404,7 @@
       max-width: 100%;
       box-sizing: border-box;
       overflow: hidden;
-      background: rgba(255,255,255,0.72);
+      background: var(--meta-bg);
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 10px 12px;
@@ -1007,7 +1433,7 @@
     }
 
     .ai-interaction {
-      background: rgba(255,255,255,0.82);
+      background: var(--meta-bg);
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 10px 12px;
@@ -1453,6 +1879,7 @@
           <option value="2">舒适</option>
           <option value="2.3">宽松</option>
         </select>
+        <button id="readerThemeToggle" class="theme-toggle" type="button" onclick="toggleReaderTheme()" title="切换日间或夜间阅读模式">🌙 夜间</button>
       </div>
 
       <div class="reader-content" id="chapterContent">
@@ -1478,20 +1905,85 @@
         <div class="ai-session" id="aiSessionLabel">未选择书籍</div>
       </div>
 
-      <div class="ai-messages" id="aiMessages"></div>
+      <div class="ai-panel-tabs">
+        <button class="ai-panel-tab active" id="agentTabBtn" type="button" onclick="switchReaderSideTab('agent')">Agent</button>
+        <button class="ai-panel-tab" id="notesTabBtn" type="button" onclick="switchReaderSideTab('notes')">划词与想法</button>
+      </div>
 
-      <div class="ai-input-area">
-        <div class="ai-selection-chip" id="aiSelectionChip">
-          <div class="ai-selection-text" id="aiSelectionText"></div>
-          <button class="ai-selection-clear" id="aiSelectionClear" type="button">清除</button>
+      <div class="ai-agent-pane" id="aiAgentPane">
+        <div class="ai-messages" id="aiMessages"></div>
+
+        <div class="ai-input-area">
+          <div class="ai-selection-chip" id="aiSelectionChip">
+            <div class="ai-selection-text" id="aiSelectionText"></div>
+            <button class="ai-selection-clear" id="aiSelectionClear" type="button">清除</button>
+          </div>
+          <div class="ai-input-wrap">
+            <textarea id="aiQuestionInput" placeholder="先选择一本书，然后向我提问..." disabled></textarea>
+            <button id="aiSendBtn" class="ai-send-btn" onclick="sendAiQuestion()" disabled title="发送">↑</button>
+          </div>
+          <div class="ai-input-hint" id="aiInputHint">未登录也可以试用；登录后会启用个人记忆。</div>
         </div>
-        <div class="ai-input-wrap">
-          <textarea id="aiQuestionInput" placeholder="先选择一本书，然后向我提问..." disabled></textarea>
-          <button id="aiSendBtn" class="ai-send-btn" onclick="sendAiQuestion()" disabled title="发送">↑</button>
+      </div>
+
+      <div class="annotation-pane" id="annotationPane" hidden>
+        <div class="annotation-filter">
+          <button id="chapterNotesFilter" class="active" type="button" onclick="setAnnotationFilter('chapter')">本章</button>
+          <button id="bookNotesFilter" type="button" onclick="setAnnotationFilter('book')">全书</button>
         </div>
-        <div class="ai-input-hint" id="aiInputHint">未登录也可以试用；登录后会启用个人记忆。</div>
+        <div class="annotation-list" id="annotationList"></div>
       </div>
     </aside>
+  </div>
+</div>
+
+<div class="annotation-toolbar" id="annotationToolbar">
+  <div class="annotation-toolbar-main">
+    <button class="annotation-action annotation-highlight-action" type="button">划词</button>
+    <button class="annotation-action annotation-write" type="button">写想法</button>
+  </div>
+  <div class="annotation-mark-picker">
+    <button class="annotation-style-choice active" type="button" data-style="highlight">色块</button>
+    <button class="annotation-style-choice underline-demo" type="button" data-style="underline">直线</button>
+    <button class="annotation-style-choice wavy-demo" type="button" data-style="wavy">波浪</button>
+    <button class="annotation-picker-color active" type="button" data-color="yellow" title="黄色"></button>
+    <button class="annotation-picker-color" type="button" data-color="green" title="绿色"></button>
+    <button class="annotation-picker-color" type="button" data-color="blue" title="蓝色"></button>
+    <button class="annotation-picker-color" type="button" data-color="red" title="红色"></button>
+    <button class="annotation-picker-save" type="button">确定</button>
+  </div>
+</div>
+
+<div class="annotation-overlay" id="annotationOverlay">
+  <div class="annotation-editor">
+    <h3 id="annotationEditorTitle">写想法</h3>
+    <div class="annotation-editor-quote" id="annotationEditorQuote"></div>
+    <div class="annotation-editor-mark-options" id="annotationEditorMarkOptions">
+      <button class="annotation-style-choice" type="button" data-style="highlight">色块</button>
+      <button class="annotation-style-choice underline-demo" type="button" data-style="underline">直线</button>
+      <button class="annotation-style-choice wavy-demo" type="button" data-style="wavy">波浪</button>
+      <button class="annotation-picker-color" type="button" data-color="yellow" title="黄色"></button>
+      <button class="annotation-picker-color" type="button" data-color="green" title="绿色"></button>
+      <button class="annotation-picker-color" type="button" data-color="blue" title="蓝色"></button>
+      <button class="annotation-picker-color" type="button" data-color="red" title="红色"></button>
+    </div>
+    <textarea id="annotationEditorText" maxlength="10000" placeholder="写下你的想法……"></textarea>
+    <div class="annotation-editor-actions">
+      <button id="annotationDeleteBtn" class="btn btn-secondary danger" type="button">删除</button>
+      <button class="btn btn-secondary" type="button" onclick="closeAnnotationEditor()">取消</button>
+      <button id="annotationSaveBtn" class="btn btn-primary" type="button">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="reading-dialog-overlay" id="readingDialogOverlay" role="dialog" aria-modal="true" aria-labelledby="readingDialogTitle">
+  <div class="reading-dialog">
+    <h3 id="readingDialogTitle">确认操作</h3>
+    <p id="readingDialogMessage"></p>
+    <div class="reading-dialog-actions">
+      <button id="readingDialogCancelBtn" type="button">取消</button>
+      <button id="readingDialogConfirmBtn" class="confirm" type="button">确定</button>
+    </div>
   </div>
 </div>
 
@@ -1630,6 +2122,16 @@ let profileUpdating = false;
 let profileStyleLoading = false;
 let profileStyleSaving = false;
 let selectedReadingContext = null;
+let pendingAnnotationAnchor = null;
+let currentAnnotations = [];
+let annotationFilter = 'chapter';
+let editingAnnotation = null;
+let markPickerStyle = 'highlight';
+let markPickerColor = 'yellow';
+let annotationEditorStyle = 'highlight';
+let annotationEditorColor = 'yellow';
+let readingDialogAction = null;
+let orphanedAnnotationIds = new Set();
 let readingProgressSaveTimer = null;
 let suppressReadingProgressTracking = false;
 const guestUserId = 'guest_' + Date.now();
@@ -1679,6 +2181,7 @@ async function doLogin() {
     updateUserStatus();
     updateAiPanelState();
     loadBookshelf();
+    if (currentBookId) loadChapterAnnotations();
     closeLogin();
   } catch (e) {
     document.getElementById('loginMsg').textContent = '登录失败';
@@ -1736,6 +2239,22 @@ function saveReaderStyle() {
   localStorage.setItem('readerTextStyle', JSON.stringify(readerStyle));
 }
 
+function toggleReaderTheme() {
+  const current = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'day';
+  const next = current === 'dark' ? 'day' : 'dark';
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem('readerTheme', next);
+  updateReaderThemeToggle();
+}
+
+function updateReaderThemeToggle() {
+  const button = document.getElementById('readerThemeToggle');
+  if (!button) return;
+  const dark = document.documentElement.dataset.theme === 'dark';
+  button.textContent = dark ? '☀️ 日间' : '🌙 夜间';
+  button.setAttribute('aria-pressed', dark ? 'true' : 'false');
+}
+
 function applyReaderStyle() {
   const content = document.getElementById('chapterContent');
   if (!content) return;
@@ -1777,15 +2296,34 @@ function captureReadingSelection() {
   const contentEl = document.getElementById('chapterContent');
   const selection = window.getSelection();
   if (!contentEl || !selection || selection.rangeCount === 0) return;
-  const selectedText = selection.toString().trim();
+  const rawSelection = selection.toString();
+  const selectedText = rawSelection.trim();
   if (!selectedText) return;
   const range = selection.getRangeAt(0);
   if (!contentEl.contains(range.commonAncestorContainer)) return;
+  const root = annotationTextRoot();
+  if (!root || !root.contains(range.startContainer) || !root.contains(range.endContainer)) return;
+  const leadingWhitespace = rawSelection.length - rawSelection.trimStart().length;
+  const offsetRange = document.createRange();
+  offsetRange.selectNodeContents(root);
+  offsetRange.setEnd(range.startContainer, range.startOffset);
+  const startOffset = offsetRange.toString().length + leadingWhitespace;
+  pendingAnnotationAnchor = {
+    selectedText,
+    startOffset,
+    endOffset: startOffset + selectedText.length,
+    prefixText: root.textContent.slice(Math.max(0, startOffset - 120), startOffset),
+    suffixText: root.textContent.slice(startOffset + selectedText.length, startOffset + selectedText.length + 120)
+  };
+  markPickerStyle = 'highlight';
+  markPickerColor = 'yellow';
+  updateMarkPickerState();
   selectedReadingContext = {
     selectedText: trimText(selectedText, 500),
     selectedContext: buildSelectedReadingContext(selectedText)
   };
   renderSelectedReadingContext();
+  showAnnotationToolbar(range.getBoundingClientRect());
 }
 
 function buildSelectedReadingContext(selectedText) {
@@ -1866,9 +2404,382 @@ function renderSelectedReadingContext() {
 
 function clearSelectedReadingContext() {
   selectedReadingContext = null;
+  pendingAnnotationAnchor = null;
+  hideAnnotationToolbar();
   const selection = window.getSelection();
   if (selection) selection.removeAllRanges();
   renderSelectedReadingContext();
+}
+
+function annotationTextRoot() {
+  const content = document.getElementById('chapterContent');
+  return content ? (content.querySelector('.reader-rich-body') || content) : null;
+}
+
+function showAnnotationToolbar(rect) {
+  const toolbar = document.getElementById('annotationToolbar');
+  if (!toolbar || !pendingAnnotationAnchor) return;
+  toolbar.classList.add('active');
+  const width = toolbar.offsetWidth || 150;
+  const left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.left + rect.width / 2 - width / 2));
+  const top = Math.max(8, rect.top - 52);
+  toolbar.style.left = left + 'px';
+  toolbar.style.top = top + 'px';
+}
+
+function hideAnnotationToolbar() {
+  const toolbar = document.getElementById('annotationToolbar');
+  if (toolbar) toolbar.classList.remove('active', 'picking');
+}
+
+async function createAnnotation(color, noteContent, markStyle) {
+  if (!pendingAnnotationAnchor || !currentBookId) return;
+  if (!hasAuthUser()) {
+    hideAnnotationToolbar();
+    openLogin();
+    return;
+  }
+  const payload = {
+    ...pendingAnnotationAnchor,
+    color: color || 'yellow',
+    markStyle: markStyle || 'highlight',
+    noteContent: noteContent || null
+  };
+  try {
+    const created = await api('POST',
+      '/api/user/books/' + currentBookId + '/chapters/' + currentChapterIndex + '/annotations',
+      payload);
+    currentAnnotations.push(created);
+    clearSelectedReadingContext();
+    await loadChapterAnnotations();
+    renderAnnotationList();
+  } catch (e) {
+    alert('保存划线失败：' + e.message);
+  }
+}
+
+async function loadChapterAnnotations() {
+  orphanedAnnotationIds = new Set();
+  if (!hasAuthUser() || !currentBookId) {
+    currentAnnotations = [];
+    renderAnnotationList();
+    return;
+  }
+  try {
+    currentAnnotations = await api('GET',
+      '/api/user/books/' + currentBookId + '/chapters/' + currentChapterIndex + '/annotations') || [];
+    renderChapterAnnotations();
+    if (annotationFilter === 'chapter') renderAnnotationList();
+  } catch (e) {
+    console.warn('加载划线失败', e);
+    currentAnnotations = [];
+  }
+}
+
+function renderChapterAnnotations() {
+  const root = annotationTextRoot();
+  if (!root) return;
+  root.querySelectorAll('.reading-highlight').forEach(mark => {
+    mark.replaceWith(...mark.childNodes);
+  });
+  root.normalize();
+  const text = root.textContent || '';
+  currentAnnotations
+    .slice()
+    .sort((a, b) => (b.startOffset || 0) - (a.startOffset || 0))
+    .forEach(annotation => {
+      const resolved = resolveAnnotationAnchor(annotation, text);
+      if (!resolved) {
+        orphanedAnnotationIds.add(annotation.id);
+        return;
+      }
+      applyAnnotationMarks(root, resolved.start, resolved.end, annotation);
+    });
+}
+
+function resolveAnnotationAnchor(annotation, text) {
+  const start = Number(annotation.startOffset);
+  const selected = annotation.selectedText || '';
+  if (start >= 0 && text.slice(start, start + selected.length) === selected) {
+    return { start, end: start + selected.length };
+  }
+  let best = null;
+  let from = 0;
+  while (selected && from <= text.length) {
+    const index = text.indexOf(selected, from);
+    if (index < 0) break;
+    let score = 0;
+    const prefix = annotation.prefixText || '';
+    const suffix = annotation.suffixText || '';
+    if (prefix) {
+      const comparable = prefix.slice(-Math.min(prefix.length, index, 120));
+      if (text.slice(index - comparable.length, index) === comparable) score += comparable.length;
+    }
+    if (suffix) {
+      const comparable = suffix.slice(0, 120);
+      if (text.slice(index + selected.length, index + selected.length + comparable.length) === comparable) {
+        score += comparable.length;
+      }
+    }
+    score -= Math.abs(index - (Number.isFinite(start) ? start : index)) / 1000;
+    if (!best || score > best.score) best = { start: index, end: index + selected.length, score };
+    from = index + Math.max(1, selected.length);
+  }
+  return best ? { start: best.start, end: best.end } : null;
+}
+
+function applyAnnotationMarks(root, start, end, annotation) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const segments = [];
+  let node;
+  let offset = 0;
+  while ((node = walker.nextNode())) {
+    const nodeStart = offset;
+    const nodeEnd = offset + node.data.length;
+    if (nodeEnd > start && nodeStart < end) {
+      segments.push({
+        node,
+        start: Math.max(0, start - nodeStart),
+        end: Math.min(node.data.length, end - nodeStart)
+      });
+    }
+    offset = nodeEnd;
+  }
+  segments.reverse().forEach(segment => {
+    if (segment.end <= segment.start) return;
+    const range = document.createRange();
+    range.setStart(segment.node, segment.start);
+    range.setEnd(segment.node, segment.end);
+    const mark = document.createElement('mark');
+    const markStyle = ['highlight', 'underline', 'wavy'].includes(annotation.markStyle)
+      ? annotation.markStyle : 'highlight';
+    mark.className = 'reading-highlight mark-' + markStyle
+      + (annotation.noteContent ? ' has-note' : '');
+    mark.dataset.annotationId = annotation.id;
+    mark.dataset.color = annotation.color || 'yellow';
+    range.surroundContents(mark);
+  });
+}
+
+function switchReaderSideTab(tab) {
+  const notes = tab === 'notes';
+  document.getElementById('aiAgentPane').hidden = notes;
+  document.getElementById('annotationPane').hidden = !notes;
+  document.getElementById('agentTabBtn').classList.toggle('active', !notes);
+  document.getElementById('notesTabBtn').classList.toggle('active', notes);
+  if (notes) renderAnnotationList();
+}
+
+async function setAnnotationFilter(filter) {
+  annotationFilter = filter === 'book' ? 'book' : 'chapter';
+  document.getElementById('chapterNotesFilter').classList.toggle('active', annotationFilter === 'chapter');
+  document.getElementById('bookNotesFilter').classList.toggle('active', annotationFilter === 'book');
+  if (annotationFilter === 'book' && hasAuthUser() && currentBookId) {
+    try {
+      const items = await api('GET', '/api/user/books/' + currentBookId + '/annotations') || [];
+      renderAnnotationList(items);
+      return;
+    } catch (e) {
+      console.warn('加载全书划词与想法失败', e);
+    }
+  }
+  renderAnnotationList();
+}
+
+function renderAnnotationList(items) {
+  const list = document.getElementById('annotationList');
+  if (!list) return;
+  const annotations = (items || currentAnnotations).slice().sort((a, b) => {
+    const noteOrder = Number(!!b.noteContent) - Number(!!a.noteContent);
+    return noteOrder || String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''));
+  });
+  list.replaceChildren();
+  if (!hasAuthUser()) {
+    list.innerHTML = '<div class="annotation-empty">登录后可保存并跨设备同步划词和想法。</div>';
+    return;
+  }
+  if (!annotations.length) {
+    list.innerHTML = '<div class="annotation-empty">选择正文后即可划词或写想法。</div>';
+    return;
+  }
+  annotations.forEach(annotation => {
+    const item = document.createElement('div');
+    item.className = 'annotation-item'
+      + (annotation.noteContent ? ' has-note' : '')
+      + (orphanedAnnotationIds.has(annotation.id) ? ' orphaned' : '');
+    item.dataset.color = annotation.color || 'yellow';
+    const quote = document.createElement('div');
+    quote.className = 'annotation-item-quote';
+    quote.textContent = '“' + trimText(annotation.selectedText, 150) + '”';
+    item.appendChild(quote);
+    if (annotation.noteContent) {
+      const note = document.createElement('div');
+      note.className = 'annotation-item-note';
+      note.textContent = annotation.noteContent;
+      item.appendChild(note);
+    }
+    const meta = document.createElement('div');
+    meta.className = 'annotation-item-meta';
+    const chapter = annotation.chapterTitle || ('第 ' + annotation.chapterIndex + ' 章');
+    meta.textContent = chapter + (orphanedAnnotationIds.has(annotation.id) ? ' · 原文位置已变化' : '');
+    item.appendChild(meta);
+    item.addEventListener('click', () => locateAnnotation(annotation));
+    list.appendChild(item);
+  });
+}
+
+async function locateAnnotation(annotation) {
+  if (annotation.chapterIndex !== currentChapterIndex) {
+    currentChapterIndex = annotation.chapterIndex;
+    await loadCurrentChapter();
+  }
+  const mark = document.querySelector('.reading-highlight[data-annotation-id="' + annotation.id + '"]');
+  if (mark) {
+    mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    document.querySelectorAll('.annotation-focus').forEach(el => el.classList.remove('annotation-focus'));
+    document.querySelectorAll('.reading-highlight[data-annotation-id="' + annotation.id + '"]')
+      .forEach(el => el.classList.add('annotation-focus'));
+    window.setTimeout(() => document.querySelectorAll('.annotation-focus')
+      .forEach(el => el.classList.remove('annotation-focus')), 1800);
+  }
+}
+
+function openAnnotationEditor(annotation) {
+  editingAnnotation = annotation || null;
+  annotationEditorStyle = annotation && annotation.markStyle ? annotation.markStyle : 'highlight';
+  annotationEditorColor = annotation && annotation.color ? annotation.color : 'yellow';
+  document.getElementById('annotationEditorTitle').textContent =
+    annotation && !annotation.noteContent ? '编辑划词' : '写想法';
+  document.getElementById('annotationEditorQuote').textContent =
+    annotation ? annotation.selectedText : (pendingAnnotationAnchor ? pendingAnnotationAnchor.selectedText : '');
+  document.getElementById('annotationEditorText').value = annotation && annotation.noteContent
+    ? annotation.noteContent : '';
+  document.getElementById('annotationDeleteBtn').style.visibility = annotation ? 'visible' : 'hidden';
+  document.getElementById('annotationEditorMarkOptions').style.display =
+    annotation && !annotation.noteContent ? 'flex' : 'none';
+  updateAnnotationEditorMarkOptions();
+  hideAnnotationToolbar();
+  document.getElementById('annotationOverlay').classList.add('active');
+  document.getElementById('annotationEditorText').focus();
+}
+
+function closeAnnotationEditor() {
+  editingAnnotation = null;
+  document.getElementById('annotationOverlay').classList.remove('active');
+}
+
+async function saveAnnotationEditor() {
+  const noteContent = document.getElementById('annotationEditorText').value.trim();
+  try {
+    if (editingAnnotation) {
+      await api('PUT', '/api/user/annotations/' + editingAnnotation.id, {
+        color: annotationEditorColor,
+        markStyle: annotationEditorStyle,
+        noteContent
+      });
+    } else {
+      await createAnnotation(annotationEditorColor, noteContent, annotationEditorStyle);
+    }
+    closeAnnotationEditor();
+    await loadChapterAnnotations();
+    if (annotationFilter === 'book') await setAnnotationFilter('book');
+  } catch (e) {
+    alert('保存想法失败：' + e.message);
+  }
+}
+
+function openAnnotationMarkPicker() {
+  if (!hasAuthUser()) {
+    hideAnnotationToolbar();
+    openLogin();
+    return;
+  }
+  document.getElementById('annotationToolbar').classList.add('picking');
+  updateMarkPickerState();
+  window.requestAnimationFrame(() => {
+    const toolbar = document.getElementById('annotationToolbar');
+    const left = Math.max(8, Math.min(
+      window.innerWidth - toolbar.offsetWidth - 8,
+      parseFloat(toolbar.style.left) || 8
+    ));
+    toolbar.style.left = left + 'px';
+  });
+}
+
+function updateMarkPickerState() {
+  const picker = document.querySelector('#annotationToolbar .annotation-mark-picker');
+  if (!picker) return;
+  picker.querySelectorAll('[data-style]').forEach(button => {
+    button.classList.toggle('active', button.dataset.style === markPickerStyle);
+  });
+  picker.querySelectorAll('[data-color]').forEach(button => {
+    button.classList.toggle('active', button.dataset.color === markPickerColor);
+  });
+}
+
+function updateAnnotationEditorMarkOptions() {
+  const options = document.getElementById('annotationEditorMarkOptions');
+  if (!options) return;
+  options.querySelectorAll('[data-style]').forEach(button => {
+    button.classList.toggle('active', button.dataset.style === annotationEditorStyle);
+  });
+  options.querySelectorAll('[data-color]').forEach(button => {
+    button.classList.toggle('active', button.dataset.color === annotationEditorColor);
+  });
+}
+
+function openReadingDialog(title, message, options) {
+  const config = options || {};
+  readingDialogAction = typeof config.onConfirm === 'function' ? config.onConfirm : null;
+  document.getElementById('readingDialogTitle').textContent = title || '确认操作';
+  document.getElementById('readingDialogMessage').textContent = message || '';
+  const cancel = document.getElementById('readingDialogCancelBtn');
+  const confirmButton = document.getElementById('readingDialogConfirmBtn');
+  cancel.style.display = config.showCancel === false ? 'none' : '';
+  confirmButton.textContent = config.confirmText || '确定';
+  confirmButton.classList.toggle('danger', !!config.danger);
+  document.getElementById('readingDialogOverlay').classList.add('active');
+  confirmButton.focus();
+}
+
+function closeReadingDialog() {
+  readingDialogAction = null;
+  document.getElementById('readingDialogOverlay').classList.remove('active');
+}
+
+async function acceptReadingDialog() {
+  const action = readingDialogAction;
+  closeReadingDialog();
+  if (action) await action();
+}
+
+function deleteEditingAnnotation() {
+  if (!editingAnnotation) return;
+  const annotationId = editingAnnotation.id;
+  const hasThought = !!editingAnnotation.noteContent;
+  openReadingDialog(
+    hasThought ? '删除划词和想法？' : '删除这条划词？',
+    hasThought
+      ? '删除后，划词、想法以及对应的画像证据都会被移除，此操作无法撤销。'
+      : '删除后将无法恢复这条划词。',
+    {
+      confirmText: '删除',
+      danger: true,
+      onConfirm: async () => {
+        try {
+          await api('DELETE', '/api/user/annotations/' + annotationId);
+          closeAnnotationEditor();
+          await loadChapterAnnotations();
+          if (annotationFilter === 'book') await setAnnotationFilter('book');
+        } catch (e) {
+          openReadingDialog('删除失败', e.message || '暂时无法删除，请稍后重试。', {
+            confirmText: '知道了',
+            showCancel: false
+          });
+        }
+      }
+    }
+  );
 }
 
 // ========== 页面切换 ==========
@@ -2035,7 +2946,13 @@ function renderChapterOptions(select, chapters) {
 function chapterOption(ch) {
   const opt = document.createElement('option');
   opt.value = ch.chapterIndex;
-  opt.textContent = ch.chapterIndex + '. ' + ch.title;
+  const level = Math.max(1, Math.min(3, Number(ch.hierarchyLevel) || 1));
+  const indent = '\u00A0\u00A0\u00A0'.repeat(level - 1);
+  opt.textContent = indent + (ch.title || '未命名章节');
+  opt.dataset.level = String(level);
+  if (level === 1) {
+    opt.style.fontWeight = '600';
+  }
   return opt;
 }
 
@@ -2046,6 +2963,7 @@ async function loadCurrentChapter() {
     currentChapterTitle = chapter.title || '';
     currentChapterContent = chapter.content || '';
     renderChapterContent(chapter);
+    await loadChapterAnnotations();
     selectedReadingContext = null;
     renderSelectedReadingContext();
     document.getElementById('chapterSelect').value = currentChapterIndex;
@@ -2849,8 +3767,82 @@ document.getElementById('profileStyleOverlay').addEventListener('click', functio
 
 document.getElementById('chapterContent').addEventListener('mouseup', captureReadingSelection);
 document.getElementById('chapterContent').addEventListener('keyup', captureReadingSelection);
+document.getElementById('chapterContent').addEventListener('pointerdown', function(e) {
+  if (e.target.closest('.reading-highlight')) return;
+  hideAnnotationToolbar();
+  pendingAnnotationAnchor = null;
+  selectedReadingContext = null;
+  renderSelectedReadingContext();
+});
 document.getElementById('chapterContent').addEventListener('touchend', function() {
   setTimeout(captureReadingSelection, 0);
+});
+document.getElementById('chapterContent').addEventListener('click', function(e) {
+  const mark = e.target.closest('.reading-highlight');
+  if (!mark) return;
+  const annotation = currentAnnotations.find(item => String(item.id) === mark.dataset.annotationId);
+  if (annotation) {
+    e.preventDefault();
+    openAnnotationEditor(annotation);
+  }
+});
+document.querySelector('#annotationToolbar .annotation-highlight-action')
+  .addEventListener('click', openAnnotationMarkPicker);
+document.querySelector('#annotationToolbar .annotation-write').addEventListener('click', () => {
+  if (!hasAuthUser()) {
+    hideAnnotationToolbar();
+    openLogin();
+    return;
+  }
+  openAnnotationEditor(null);
+});
+document.querySelectorAll('#annotationToolbar .annotation-mark-picker [data-style]').forEach(button => {
+  button.addEventListener('click', () => {
+    markPickerStyle = button.dataset.style;
+    updateMarkPickerState();
+  });
+});
+document.querySelectorAll('#annotationToolbar .annotation-mark-picker [data-color]').forEach(button => {
+  button.addEventListener('click', () => {
+    markPickerColor = button.dataset.color;
+    updateMarkPickerState();
+  });
+});
+document.querySelector('#annotationToolbar .annotation-picker-save').addEventListener('click', () => {
+  createAnnotation(markPickerColor, null, markPickerStyle);
+});
+document.querySelectorAll('#annotationEditorMarkOptions [data-style]').forEach(button => {
+  button.addEventListener('click', () => {
+    annotationEditorStyle = button.dataset.style;
+    updateAnnotationEditorMarkOptions();
+  });
+});
+document.querySelectorAll('#annotationEditorMarkOptions [data-color]').forEach(button => {
+  button.addEventListener('click', () => {
+    annotationEditorColor = button.dataset.color;
+    updateAnnotationEditorMarkOptions();
+  });
+});
+document.getElementById('annotationSaveBtn').addEventListener('click', saveAnnotationEditor);
+document.getElementById('annotationDeleteBtn').addEventListener('click', deleteEditingAnnotation);
+document.getElementById('annotationOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeAnnotationEditor();
+});
+document.getElementById('readingDialogCancelBtn').addEventListener('click', closeReadingDialog);
+document.getElementById('readingDialogConfirmBtn').addEventListener('click', acceptReadingDialog);
+document.getElementById('readingDialogOverlay').addEventListener('click', function(e) {
+  if (e.target === this) closeReadingDialog();
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape' && document.getElementById('readingDialogOverlay').classList.contains('active')) {
+    closeReadingDialog();
+  }
+});
+document.addEventListener('mousedown', function(e) {
+  const toolbar = document.getElementById('annotationToolbar');
+  if (!toolbar.contains(e.target) && !document.getElementById('chapterContent').contains(e.target)) {
+    hideAnnotationToolbar();
+  }
 });
 document.getElementById('aiSelectionClear').addEventListener('click', clearSelectedReadingContext);
 window.addEventListener('scroll', scheduleReadingProgressSave, { passive: true });
@@ -2862,6 +3854,7 @@ document.addEventListener('visibilitychange', function() {
 
 restoreUser();
 restoreReaderStyle();
+updateReaderThemeToggle();
 updateUserStatus();
 loadBookshelf();
 updateAiPanelState();

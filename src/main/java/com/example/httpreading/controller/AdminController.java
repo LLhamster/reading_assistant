@@ -83,6 +83,25 @@ public class AdminController {
         return booksAdminService.refreshImportIndex();
     }
 
+    /** 上传新文件覆盖现有书籍，保留 bookId、书架和阅读进度。 */
+    @PostMapping(value = "/books/{bookId}/replace", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Books replaceBook(@PathVariable Long bookId,
+                             @RequestParam("file") MultipartFile file,
+                             @RequestParam(value = "title", required = false) String title,
+                             @RequestParam(value = "author", required = false) String author,
+                             @RequestParam(value = "intro", required = false) String intro,
+                             @RequestParam(value = "status", required = false) String status,
+                             @RequestParam(value = "coverUrl", required = false) String coverUrl) {
+        BookCreateRequest req = new BookCreateRequest();
+        req.setTitle(title);
+        req.setAuthor(author);
+        req.setIntro(intro);
+        req.setStatus(status);
+        req.setCoverUrl(coverUrl);
+        log.info("管理员替换书籍文件 - bookId:{}, filename:{}", bookId, file.getOriginalFilename());
+        return booksAdminService.replaceBookFile(bookId, req, file);
+    }
+
     /** 重新解析已保存的原始书籍文件，不自动构建 RAG */
     @PostMapping("/books/{bookId}/reparse")
     public Books reparseBook(@PathVariable Long bookId) {

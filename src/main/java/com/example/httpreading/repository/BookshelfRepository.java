@@ -12,4 +12,6 @@ public interface BookshelfRepository extends JpaRepository<Bookshelf, Long>{
     public List<Bookshelf>findByUserId(Long userId);
 
     public Optional<Bookshelf>findByUserIdAndBookId(Long userId, Long bookId);
+
+    void deleteByBookId(Long bookId);
 }

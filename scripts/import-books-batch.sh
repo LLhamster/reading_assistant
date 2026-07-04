@@ -325,10 +325,15 @@ for file in "${files[@]}"; do
   if [[ "$RESUME" == "true"
         && "${state_size[$filename]:-}" == "$size"
         && "${state_mtime[$filename]:-}" == "$mtime"
-        && -n "${state_book_id[$filename]:-}" ]]; then
-    echo "==> UNCHANGED: $filename (bookId=${state_book_id[$filename]})"
-    unchanged_count=$((unchanged_count + 1))
-    continue
+        && -n "${state_book_id[$filename]:-}"
+        && -n "${state_hash[$filename]:-}" ]]; then
+    indexed_book_id="$(lookup_server_book_id "${state_hash[$filename]}" "$server_index")"
+    if [[ "$indexed_book_id" == "${state_book_id[$filename]}" ]]; then
+      echo "==> UNCHANGED: $filename (bookId=${state_book_id[$filename]})"
+      unchanged_count=$((unchanged_count + 1))
+      continue
+    fi
+    echo "==> STALE STATE: $filename (deleted or replaced bookId=${state_book_id[$filename]})"
   fi
 
   echo "==> Processing: $filename"

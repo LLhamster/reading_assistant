@@ -300,12 +300,30 @@ public class QdrantStore {
 				return true;
 			}
 
-			JSONObject body = new JSONObject().put("points", new JSONArray(ids));
+			JSONArray pointIds = new JSONArray();
+			ids.forEach(id -> pointIds.put(toSafeQdrantId(id)));
+			JSONObject body = new JSONObject().put("points", pointIds);
 			requestJson("POST", "/collections/" + collectionName + "/points/delete?wait=true", body);
 			logger.info("成功删除 {} 个向量", ids.size());
 			return true;
 		} catch (Exception e) {
 			logger.error("删除向量失败: {}", e.getMessage());
+			return false;
+		}
+	}
+
+	public boolean deleteVectorsByFilter(Map<String, Object> where) {
+		try {
+			JSONObject filter = buildFilter(where);
+			if (filter == null) {
+				return true;
+			}
+			JSONObject body = new JSONObject().put("filter", filter);
+			requestJson("POST", "/collections/" + collectionName + "/points/delete?wait=true", body);
+			logger.info("成功按条件删除向量: {}", where);
+			return true;
+		} catch (Exception e) {
+			logger.error("按条件删除向量失败 where={}, reason={}", where, e.getMessage());
 			return false;
 		}
 	}

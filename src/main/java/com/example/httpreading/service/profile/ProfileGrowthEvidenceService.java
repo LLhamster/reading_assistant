@@ -1,6 +1,7 @@
 package com.example.httpreading.service.profile;
 
 import java.util.List;
+import java.util.Optional;
 
 import com.example.httpreading.domain.profile.ProfileGrowthEvidence;
 import com.example.httpreading.repository.ProfileGrowthEvidenceRepository;
@@ -37,5 +38,15 @@ public class ProfileGrowthEvidenceService {
     public List<ProfileGrowthEvidence> recentEvidence(String userId, int limit) {
         List<ProfileGrowthEvidence> all = repository.findByUserIdAndStatusOrderByCreatedAtDesc(userId, "active");
         return all.stream().limit(limit <= 0 ? 20 : limit).toList();
+    }
+
+    public Optional<ProfileGrowthEvidence> findByAnnotationId(Long annotationId) {
+        return repository.findByRelatedAnnotationId(annotationId);
+    }
+
+    public List<ProfileGrowthEvidence> recentReadingNotes(String userId, int limit) {
+        List<ProfileGrowthEvidence> all =
+            repository.findByUserIdAndEvidenceTypeAndStatusOrderByUpdatedAtDesc(userId, "reading_note", "active");
+        return all.stream().limit(limit <= 0 ? 30 : limit).toList();
     }
 }

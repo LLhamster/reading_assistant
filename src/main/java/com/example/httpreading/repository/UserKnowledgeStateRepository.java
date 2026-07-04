@@ -12,4 +12,6 @@ public interface UserKnowledgeStateRepository extends JpaRepository<UserKnowledg
     List<UserKnowledgeState> findByUserIdOrderByUpdatedAtDesc(String userId);
 
     List<UserKnowledgeState> findByUserIdAndDomainOrderByUpdatedAtDesc(String userId, String domain);
+
+    List<UserKnowledgeState> findByRelatedBookId(Long relatedBookId);
 }

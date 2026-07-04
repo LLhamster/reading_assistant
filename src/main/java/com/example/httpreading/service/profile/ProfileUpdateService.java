@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.HashMap;
 
 import com.example.httpreading.domain.profile.ProfileGrowthEvidence;
 import com.example.httpreading.domain.profile.ProfileUpdateLog;
@@ -77,14 +78,17 @@ public class ProfileUpdateService {
         String userId = userResolver.resolve(request == null ? null : request.userId(),
             request == null ? null : request.sessionId());
         List<MemoryItem> memories = agentMemoryService.recentImportantEpisodic(userId, DEFAULT_MEMORY_LIMIT, MIN_IMPORTANCE);
-        if (memories.size() < MIN_MEMORY_COUNT) {
+        List<ProfileGrowthEvidence> readingNotes = evidenceService.recentReadingNotes(userId, DEFAULT_MEMORY_LIMIT);
+        List<MemoryItem> profileSources = new ArrayList<>(memories);
+        profileSources.addAll(readingNotes.stream().map(this::readingNoteSource).toList());
+        if (memories.size() < MIN_MEMORY_COUNT && readingNotes.isEmpty()) {
             return new ProfileUpdateResponse(
                 "not_enough_memory",
                 userId,
-                "最近重要记忆不足，继续阅读问答后再更新画像。",
+                "最近重要记忆和阅读笔记不足，继续阅读问答或记录笔记后再更新画像。",
                 List.of(),
                 List.of("not_enough_memory"),
-                memories.size());
+                profileSources.size());
         }
 
         UserStyleProfile oldStyle = styleProfileService.findByUserId(userId).orElse(null);
@@ -95,7 +99,7 @@ public class ProfileUpdateService {
         String resolvedCategory = bookCategoryService.normalize(request == null ? null : request.bookCategory());
 
         ExtractedProfilePatch extractedPatch = patchExtractor.extract(
-            memories,
+            profileSources,
             profileMapper.toDto(oldStyle),
             oldReadings.stream().map(profileMapper::toDto).toList(),
             oldKnowledgeStates.stream().map(profileMapper::toDto).toList(),
@@ -108,7 +112,7 @@ public class ProfileUpdateService {
                 "模型画像 patch 解析失败，未写入数据库。",
                 List.of(),
                 List.of("profile_patch_parse_failed"),
-                memories.size());
+                profileSources.size());
         }
         ProfileUpdatePatch patch = extractedPatch.patch();
 
@@ -169,7 +173,7 @@ public class ProfileUpdateService {
         updateLog.setNewStyleSnapshot(profileJson.writeObject(profileMapper.toDto(newStyle)));
         updateLog.setNewReadingSnapshot(profileJson.writeObject(readingProfileService.listByUser(userId).stream().map(profileMapper::toDto).toList()));
         updateLog.setUpdatePatch(extractedPatch.rawJson());
-        updateLog.setUsedMemoryIds(profileJson.writeObject(memories.stream().map(MemoryItem::getId).toList()));
+        updateLog.setUsedMemoryIds(profileJson.writeObject(profileSources.stream().map(MemoryItem::getId).toList()));
         updateLog.setUsedEvidenceIds(profileJson.writeObject(savedEvidence.stream().map(ProfileGrowthEvidence::getId).toList()));
         updateLog.setUpdateReason(patch.summary());
         updateLogRepository.save(updateLog);
@@ -194,7 +198,7 @@ public class ProfileUpdateService {
             patch.summary() == null || patch.summary().isBlank() ? "用户画像更新完成" : patch.summary(),
             changes,
             warnings,
-            memories.size());
+            profileSources.size());
     }
 
     public ProfileOverviewResponse overview(String requestedUserId, String sessionId) {
@@ -264,6 +268,25 @@ public class ProfileUpdateService {
             return "explanation_preference";
         }
         return value.trim();
+    }
+
+    private MemoryItem readingNoteSource(ProfileGrowthEvidence evidence) {
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("sourceType", "reading_note");
+        metadata.put("existingEvidenceId", evidence.getId());
+        metadata.put("bookId", evidence.getRelatedBookId());
+        metadata.put("bookTitle", evidence.getRelatedBookTitle());
+        metadata.put("chapterIndex", evidence.getRelatedChapterIndex());
+        metadata.put("annotationId", evidence.getRelatedAnnotationId());
+        metadata.put("instruction", "该阅读笔记已保存为画像证据，只用于推导画像，不要在 newEvidence 中重复创建");
+        return new MemoryItem(
+            "reading_note:" + evidence.getId(),
+            evidence.getContent(),
+            "reading_note",
+            evidence.getUserId(),
+            evidence.getUpdatedAt(),
+            evidence.getImportance() == null ? 0.75f : evidence.getImportance().floatValue(),
+            metadata);
     }
 
 }

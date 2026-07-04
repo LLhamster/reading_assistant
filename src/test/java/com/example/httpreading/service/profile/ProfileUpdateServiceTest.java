@@ -169,6 +169,28 @@ class ProfileUpdateServiceTest {
     }
 
     @Test
+    void readingNoteAllowsProfileUpdateWhenConversationMemoryIsEmpty() {
+        when(agentMemoryService.recentImportantEpisodic(anyString(), anyInt(), anyDouble()))
+            .thenReturn(List.of());
+        ProfileGrowthEvidence note = new ProfileGrowthEvidence();
+        note.setId(31L);
+        note.setUserId("u1");
+        note.setEvidenceType("reading_note");
+        note.setContent("用户笔记：差序格局像以自己为中心扩散的水波纹。");
+        note.setImportance(0.8d);
+        note.setUpdatedAt(LocalDateTime.now());
+        when(evidenceService.recentReadingNotes("u1", 30)).thenReturn(List.of(note));
+        when(patchExtractor.extract(any(), any(), any(), any(), anyString(), anyString()))
+            .thenReturn(extracted(styleEvidenceWithoutSource()));
+
+        var response = service.updateProfileManually(request());
+
+        assertEquals("success", response.status());
+        assertEquals(1, response.usedMemoryCount());
+        verify(patchExtractor).extract(any(), any(), any(), any(), anyString(), anyString());
+    }
+
+    @Test
     void manualStyleUpdateWritesStyleAndSyncsVector() {
         var response = service.updateStyleManually(styleRequest());
 

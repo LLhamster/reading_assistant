@@ -39,6 +39,9 @@ public class ProfileGrowthEvidence {
     @Column(name = "related_chapter_index")
     private Integer relatedChapterIndex;
 
+    @Column(name = "related_annotation_id", unique = true)
+    private Long relatedAnnotationId;
+
     @Column(nullable = false, columnDefinition = "text")
     private String content;
 
@@ -87,6 +90,8 @@ public class ProfileGrowthEvidence {
     public void setRelatedBookTitle(String relatedBookTitle) { this.relatedBookTitle = relatedBookTitle; }
     public Integer getRelatedChapterIndex() { return relatedChapterIndex; }
     public void setRelatedChapterIndex(Integer relatedChapterIndex) { this.relatedChapterIndex = relatedChapterIndex; }
+    public Long getRelatedAnnotationId() { return relatedAnnotationId; }
+    public void setRelatedAnnotationId(Long relatedAnnotationId) { this.relatedAnnotationId = relatedAnnotationId; }
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
     public Double getImportance() { return importance; }

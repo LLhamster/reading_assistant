@@ -143,7 +143,7 @@ public class ProfilePatchExtractor {
                                     String question) {
         String resolvedCategory = bookCategoryService.normalize(fallbackCategory);
         return """
-            你是用户画像更新器，不是普通问答助手。请根据最近重要情景记忆和旧画像生成局部更新对象。
+            你是用户画像更新器，不是普通问答助手。请根据最近重要情景记忆、阅读笔记和旧画像生成局部更新对象。
 
             强制输出规则：
             - 只输出纯 JSON，不要 Markdown code fence，不要解释文字。
@@ -154,6 +154,8 @@ public class ProfilePatchExtractor {
             bookCategory/domain 只能使用：社会学、技术、历史、文学、哲学、心理学、英语、职业成长、经济学、其他。
             当前相关 bookCategory 默认值：%s
             当前问题只用于理解本次手动更新意图，不能作为 evidence 或 knowledge state 的来源。
+            memoryType=reading_note 的项目是已经保存的画像证据，可用于更新 readingPatches 和 knowledgePatches，
+            但不要把它们再次复制到 newEvidence。
             不要生成复杂 domain；readingPatches 不要记录 bookId、chapterIndex、question、answer、currentChapterIndex、readingProgress、readingStatus；不要因为一次记忆大幅改变画像。
             不要照抄 schema 示例。没有证据支持的字段必须输出 null 或 []。
 

@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -29,7 +31,11 @@ class BatchImportScriptTest {
             #!/usr/bin/env bash
             printf '%s\n' "$*" >> "$CALL_LOG"
             if [[ "$*" == *"/api/admin/books/import-index/refresh"* ]]; then
-              printf '%s\n' '{"hashes":{},"indexedCount":0,"missingSourceCount":0,"duplicateContentCount":0,"missingSourceBookIds":[]}'
+              if grep -q 'file=@' "$CALL_LOG"; then
+                printf '{"hashes":{"%s":101},"indexedCount":0,"missingSourceCount":0,"duplicateContentCount":0,"missingSourceBookIds":[]}\n' "$BOOK_HASH"
+              else
+                printf '%s\n' '{"hashes":{},"indexedCount":0,"missingSourceCount":0,"duplicateContentCount":0,"missingSourceBookIds":[]}'
+              fi
             else
               printf '%s\n' '{"id":101,"title":"乡土中国","author":"费孝通","status":"完结","parseStatus":"SUCCESS","importDisposition":"IMPORTED"}'
             fi
@@ -68,6 +74,8 @@ class BatchImportScriptTest {
             "--filename-metadata");
         builder.redirectErrorStream(true);
         builder.environment().put("CALL_LOG", callLog.toString());
+        builder.environment().put("BOOK_HASH", HexFormat.of().formatHex(
+            MessageDigest.getInstance("SHA-256").digest("epub-content".getBytes(StandardCharsets.UTF_8))));
         builder.environment().put(
             "PATH",
             fakeBin + System.getProperty("path.separator") + System.getenv("PATH"));

@@ -95,19 +95,24 @@ public class DocumentParseService {
                 String html = readZipText(zipFile, entry);
                 Document document = Jsoup.parse(html, "", Parser.xmlParser());
                 String text = stripHtml(html).trim();
-                String title = firstText(document, "h1");
-                if (isBlank(title)) {
+                HeadingRef heading = firstUsableHeading(document);
+                String title = heading.title();
+                int hierarchyLevel = heading.level();
+                if (!isUsableEpubTitle(title)) {
                     title = firstText(document, "title");
+                    hierarchyLevel = 1;
                 }
-                if (isBlank(title)) {
+                if (!isUsableEpubTitle(title)) {
                     title = Path.of(entry.getName()).getFileName().toString();
+                    hierarchyLevel = 1;
                 }
                 rewriteAndCollectImages(zipFile, entry, document, bookId, assets);
                 String contentHtml = sanitizeEpubContent(document);
                 if (text.isBlank() && !contentHtml.contains("<img")) {
                     continue;
                 }
-                chapters.add(new ParsedChapter(null, null, title.trim(), text, contentHtml));
+                chapters.add(new ParsedChapter(
+                    null, null, title.trim(), text, contentHtml, hierarchyLevel));
             }
         } catch (IOException e) {
             throw ErrorCode.BAD_REQUEST.toException("EPUB 解析失败: " + e.getMessage());
@@ -185,6 +190,26 @@ public class DocumentParseService {
     private String firstText(Document document, String selector) {
         Element element = document.selectFirst(selector);
         return element == null ? "" : element.text().trim();
+    }
+
+    private HeadingRef firstUsableHeading(Document document) {
+        List<String> selectors = List.of("h1", "h2", "h3");
+        for (int i = 0; i < selectors.size(); i++) {
+            String selector = selectors.get(i);
+            String title = firstText(document, selector);
+            if (isUsableEpubTitle(title)) {
+                return new HeadingRef(title, i + 1);
+            }
+        }
+        return new HeadingRef("", 1);
+    }
+
+    private boolean isUsableEpubTitle(String title) {
+        if (isBlank(title)) {
+            return false;
+        }
+        String normalized = title.trim().toLowerCase(Locale.ROOT);
+        return !Set.of("未知", "无标题", "unknown", "untitled", "null").contains(normalized);
     }
 
     private boolean hasSupportedImageExtension(String path) {
@@ -471,7 +496,8 @@ public class DocumentParseService {
             }
             String title = isBlank(chapter.title()) ? "全文" : chapter.title().trim();
             normalized.add(new ParsedChapter(
-                chapter.volumeIndex(), chapter.volumeTitle(), title, content, chapter.contentHtml()));
+                chapter.volumeIndex(), chapter.volumeTitle(), title, content,
+                chapter.contentHtml(), chapter.hierarchyLevel()));
         }
         if (normalized.size() == 1 && "全文".equals(normalized.get(0).title())) {
             return normalized;
@@ -481,7 +507,7 @@ public class DocumentParseService {
             if ("全文".equals(chapter.title())) {
                 normalized.set(i, new ParsedChapter(
                     chapter.volumeIndex(), chapter.volumeTitle(), "第" + (i + 1) + "章",
-                    chapter.content(), chapter.contentHtml()));
+                    chapter.content(), chapter.contentHtml(), chapter.hierarchyLevel()));
             }
         }
         return normalized;
@@ -761,17 +787,29 @@ public class DocumentParseService {
                                 String volumeTitle,
                                 String title,
                                 String content,
-                                String contentHtml) {
+                                String contentHtml,
+                                Integer hierarchyLevel) {
         public ParsedChapter(String title, String content) {
-            this(null, null, title, content, null);
+            this(null, null, title, content, null, 1);
         }
 
         public ParsedChapter(Integer volumeIndex, String volumeTitle, String title, String content) {
-            this(volumeIndex, volumeTitle, title, content, null);
+            this(volumeIndex, volumeTitle, title, content, null, 1);
+        }
+
+        public ParsedChapter(Integer volumeIndex,
+                             String volumeTitle,
+                             String title,
+                             String content,
+                             String contentHtml) {
+            this(volumeIndex, volumeTitle, title, content, contentHtml, 1);
         }
     }
 
     private record ParsedDocument(List<ParsedChapter> chapters, Map<String, byte[]> assets) {
+    }
+
+    private record HeadingRef(String title, int level) {
     }
 
     private record PdfOutlineEntry(String title, int pageIndex, Integer volumeIndex, String volumeTitle) {

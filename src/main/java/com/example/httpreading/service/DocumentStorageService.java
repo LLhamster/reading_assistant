@@ -56,6 +56,66 @@ public class DocumentStorageService {
         return relativePath;
     }
 
+    public String stageReplacementSourceFile(Long bookId, MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw ErrorCode.BAD_REQUEST.toException("替换文件不能为空");
+        }
+        String extension = extension(file.getOriginalFilename());
+        String relativePath = "books/" + bookId + "/source/replacement-" + UUID.randomUUID() + extension;
+        Path target = resolveRelativePath(relativePath);
+        try {
+            Files.createDirectories(target.getParent());
+            try (InputStream input = file.getInputStream()) {
+                Files.copy(input, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+            return relativePath;
+        } catch (IOException e) {
+            throw ErrorCode.INTERNAL_ERROR.toException("替换书籍临时文件保存失败");
+        }
+    }
+
+    public String commitReplacementSourceFile(Long bookId,
+                                              String stagedRelativePath,
+                                              String originalFilename) {
+        Path sourceDirectory = resolveRelativePath("books/" + bookId + "/source");
+        Path staged = resolveRelativePath(stagedRelativePath);
+        if (!staged.startsWith(sourceDirectory)
+            || !staged.getFileName().toString().startsWith("replacement-")) {
+            throw ErrorCode.BAD_REQUEST.toException("非法替换书籍临时路径");
+        }
+        String targetRelativePath = "books/" + bookId + "/source/original" + extension(originalFilename);
+        Path target = resolveRelativePath(targetRelativePath);
+        try {
+            Files.createDirectories(sourceDirectory);
+            moveFileReplacing(staged, target);
+            try (var sourceFiles = Files.list(sourceDirectory)) {
+                for (Path path : sourceFiles.toList()) {
+                    if (!path.equals(target) && path.getFileName().toString().startsWith("original.")) {
+                        Files.deleteIfExists(path);
+                    }
+                }
+            }
+            return targetRelativePath;
+        } catch (IOException e) {
+            throw ErrorCode.INTERNAL_ERROR.toException("替换书籍原始文件提交失败");
+        }
+    }
+
+    public void deleteStagedSourceFile(String relativePath) {
+        if (relativePath == null || relativePath.isBlank()) {
+            return;
+        }
+        Path path = resolveRelativePath(relativePath);
+        if (!path.getFileName().toString().startsWith("replacement-")) {
+            throw ErrorCode.BAD_REQUEST.toException("非法替换书籍临时路径");
+        }
+        try {
+            Files.deleteIfExists(path);
+        } catch (IOException e) {
+            throw ErrorCode.INTERNAL_ERROR.toException("替换书籍临时文件清理失败");
+        }
+    }
+
     public String sha256(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw ErrorCode.BAD_REQUEST.toException("上传文件不能为空");
@@ -188,6 +248,18 @@ public class DocumentStorageService {
         return new StoredAsset(resolved, imageMediaType(resolved.getFileName().toString()));
     }
 
+    public void deleteBookFiles(Long bookId) {
+        if (bookId == null || bookId <= 0) {
+            throw ErrorCode.BAD_REQUEST.toException("书籍 ID 不合法");
+        }
+        Path bookRoot = resolveRelativePath("books/" + bookId);
+        try {
+            deleteTree(bookRoot);
+        } catch (IOException e) {
+            throw ErrorCode.INTERNAL_ERROR.toException("书籍文件目录删除失败: " + bookId);
+        }
+    }
+
     private Path safeAssetRelativePath(String assetPath) {
         if (assetPath == null || assetPath.isBlank()) {
             throw ErrorCode.BAD_REQUEST.toException("图片路径不能为空");
@@ -236,6 +308,14 @@ public class DocumentStorageService {
             Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
         } catch (java.nio.file.AtomicMoveNotSupportedException e) {
             Files.move(source, target);
+        }
+    }
+
+    private void moveFileReplacing(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+            Files.move(source, target, StandardCopyOption.REPLACE_EXISTING);
         }
     }
 

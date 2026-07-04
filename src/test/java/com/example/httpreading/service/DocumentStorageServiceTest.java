@@ -64,4 +64,39 @@ class DocumentStorageServiceTest {
             .isEqualTo(service.sha256("books/1/source/original.epub"))
             .hasSize(64);
     }
+
+    @Test
+    void stagesAndCommitsReplacementSourceAfterValidation() throws Exception {
+        DocumentStorageService service = new DocumentStorageService(tempDir.toString());
+        Path oldSource = tempDir.resolve("books/1/source/original.epub");
+        Files.createDirectories(oldSource.getParent());
+        Files.writeString(oldSource, "old");
+        MockMultipartFile replacement = new MockMultipartFile(
+            "file", "replacement.pdf", "application/pdf", "new".getBytes());
+
+        String staged = service.stageReplacementSourceFile(1L, replacement);
+        assertThat(Files.readString(service.resolveRelativePath(staged))).isEqualTo("new");
+
+        String committed = service.commitReplacementSourceFile(1L, staged, replacement.getOriginalFilename());
+
+        assertThat(committed).isEqualTo("books/1/source/original.pdf");
+        assertThat(Files.readString(service.resolveRelativePath(committed))).isEqualTo("new");
+        assertThat(Files.exists(oldSource)).isFalse();
+    }
+
+    @Test
+    void deletesOnlyTheRequestedBookDirectory() throws Exception {
+        DocumentStorageService service = new DocumentStorageService(tempDir.toString());
+        Path firstBook = tempDir.resolve("books/1/source/original.epub");
+        Path secondBook = tempDir.resolve("books/2/source/original.epub");
+        Files.createDirectories(firstBook.getParent());
+        Files.createDirectories(secondBook.getParent());
+        Files.writeString(firstBook, "first");
+        Files.writeString(secondBook, "second");
+
+        service.deleteBookFiles(1L);
+
+        assertThat(Files.exists(tempDir.resolve("books/1"))).isFalse();
+        assertThat(Files.readString(secondBook)).isEqualTo("second");
+    }
 }

@@ -36,17 +36,20 @@ public class BooksAdminService {
     private final BookIndexProducer bookIndexProducer;
     private final DocumentStorageService documentStorageService;
     private final DocumentParseService documentParseService;
+    private final BookDeletionService bookDeletionService;
 
     public BooksAdminService(BooksRepository booksRepository,
                              ChaptersRepository chaptersRepository,
                              BookIndexProducer bookIndexProducer,
                              DocumentStorageService documentStorageService,
-                             DocumentParseService documentParseService) {
+                             DocumentParseService documentParseService,
+                             BookDeletionService bookDeletionService) {
         this.booksRepository = booksRepository;
         this.chaptersRepository = chaptersRepository;
         this.bookIndexProducer = bookIndexProducer;
         this.documentStorageService = documentStorageService;
         this.documentParseService = documentParseService;
+        this.bookDeletionService = bookDeletionService;
     }
 
     /** 新增书籍（写入 MySQL，然后发 MQ 消息异步同步 ES） */
@@ -184,6 +187,66 @@ public class BooksAdminService {
             List.copyOf(missingSourceBookIds));
     }
 
+    @Transactional
+    public Books replaceBookFile(Long bookId, BookCreateRequest req, MultipartFile file) {
+        Books book = booksRepository.findById(bookId)
+            .orElseThrow(() -> ErrorCode.BOOK_NOT_FOUND.toException("书籍不存在"));
+        String sourceHash = documentStorageService.sha256(file);
+        booksRepository.findBySourceHash(sourceHash)
+            .filter(existing -> !existing.getId().equals(bookId))
+            .ifPresent(existing -> {
+                throw ErrorCode.BAD_REQUEST.toException(
+                    "该文件已属于 bookId=" + existing.getId() + "，不能重复替换");
+            });
+
+        String title = hasText(req.getTitle()) ? req.getTitle().trim() : book.getTitle();
+        String author = hasText(req.getAuthor()) ? req.getAuthor().trim() : book.getAuthor();
+        String stagedPath = documentStorageService.stageReplacementSourceFile(bookId, file);
+        try {
+            ParsedBook parsedBook = documentParseService.parse(
+                documentStorageService.resolveRelativePath(stagedPath),
+                title,
+                author,
+                bookId);
+            LocalDateTime now = LocalDateTime.now();
+            documentStorageService.replaceBookAssets(bookId, parsedBook.assets());
+            List<Chapters> chapters = replaceChapters(bookId, parsedBook.chapters(), now);
+            String sourcePath = documentStorageService.commitReplacementSourceFile(
+                bookId, stagedPath, file.getOriginalFilename());
+
+            book.setTitle(title);
+            book.setAuthor(author);
+            if (hasText(req.getIntro())) {
+                book.setIntro(req.getIntro());
+            }
+            if (hasText(req.getStatus())) {
+                book.setStatus(req.getStatus());
+            }
+            if (hasText(req.getCoverUrl())) {
+                book.setCoverUrl(req.getCoverUrl());
+            }
+            book.setSourceFilePath(sourcePath);
+            book.setSourceFormat(documentStorageService.format(file.getOriginalFilename()).toLowerCase(Locale.ROOT));
+            book.setSourceHash(sourceHash);
+            book.setSourceOriginalName(cleanOriginalFilename(file));
+            book.setParseStatus("SUCCESS");
+            book.setParseError(null);
+            book.setUpdatedAt(now);
+            Books saved = booksRepository.save(book);
+            bookIndexProducer.sendIndexMessage(saved.getId());
+            log.info("书籍文件替换完成 - bookId:{}, title:{}, chapters:{}",
+                saved.getId(), saved.getTitle(), chapters.size());
+            return saved;
+        } finally {
+            try {
+                documentStorageService.deleteStagedSourceFile(stagedPath);
+            } catch (BusinessException cleanupError) {
+                log.warn("替换书籍临时文件清理失败 - bookId:{}, path:{}, reason:{}",
+                    bookId, stagedPath, cleanupError.getMessage());
+            }
+        }
+    }
+
     @Transactional(noRollbackFor = BusinessException.class)
     public Books reparseBook(Long bookId) {
         Books book = booksRepository.findById(bookId)
@@ -222,18 +285,10 @@ public class BooksAdminService {
         }
     }
 
-    /** 删除书籍（删除 MySQL，然后发 MQ 消息异步删除 ES） */
-    @Transactional
+    /** 完整删除书籍及其数据库、缓存、索引、向量和文件关联数据。 */
     public void deleteBook(Long bookId) {
-        Optional<Books> optBook = booksRepository.findById(bookId);
-        if (optBook.isEmpty()) {
-            log.warn("删除书籍失败，书籍不存在 - bookId:{}", bookId);
-            return;
-        }
-        booksRepository.deleteById(bookId);
-        // 发 MQ 消息，异步删除 ES
-        bookIndexProducer.sendDeleteMessage(bookId);
-        log.info("删除书籍已删除，MQ 删除消息已发送 - bookId:{}", bookId);
+        bookDeletionService.deleteBook(bookId);
+        log.info("书籍及关联数据删除完成 - bookId:{}", bookId);
     }
 
     private List<Chapters> replaceChapters(Long bookId, List<ParsedChapter> parsedChapters, LocalDateTime now) {
@@ -256,6 +311,7 @@ public class BooksAdminService {
             chapter.setTitle(parsedChapter.title());
             chapter.setVolumeIndex(parsedChapter.volumeIndex());
             chapter.setVolumeTitle(parsedChapter.volumeTitle());
+            chapter.setHierarchyLevel(parsedChapter.hierarchyLevel());
             chapter.setContent(null);
             chapter.setContentFilePath(contentPath);
             chapter.setRenderContentFilePath(renderContentPath);
@@ -286,5 +342,9 @@ public class BooksAdminService {
             return "unknown";
         }
         return java.nio.file.Path.of(filename).getFileName().toString();
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 }

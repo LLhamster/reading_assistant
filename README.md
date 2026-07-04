@@ -171,6 +171,15 @@ bash scripts/import-books-batch.sh \
 索引；之后通过目录中的 `.http-reading-import-state.tsv` 跳过未变化的文件，
 相同内容即使改名也不会重复导入。
 
+如果需要用更好的源文件覆盖现有书籍并保留 bookId、书架和阅读进度：
+
+```bash
+curl -X POST http://localhost:8080/api/admin/books/51/replace \
+  -F "file=@/home/hamster/books/学会提问__作者__完结.epub"
+```
+
+替换成功后可按需重新构建该书的 RAG 索引。
+
 ---
 
 ## AI Agent Testing

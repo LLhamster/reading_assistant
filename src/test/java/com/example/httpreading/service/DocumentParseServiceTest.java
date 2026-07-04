@@ -89,6 +89,31 @@ class DocumentParseServiceTest {
             .doesNotContain("<img");
     }
 
+    @Test
+    void epubUsesH2BeforeUnknownDocumentTitle() throws IOException {
+        Path epub = tempDir.resolve("sectioned.epub");
+        writeEpub(epub, Map.of(
+            "META-INF/container.xml",
+            "<container><rootfiles><rootfile full-path=\"book.opf\"/></rootfiles></container>",
+            "book.opf", """
+                <package><manifest>
+                  <item id="section" href="section.xhtml" media-type="application/xhtml+xml"/>
+                </manifest><spine><itemref idref="section"/></spine></package>
+                """,
+            "section.xhtml", """
+                <html><head><title>未知</title></head><body>
+                  <h2>我们生活在嘈杂、混乱的世界</h2>
+                  <p>正文内容。</p>
+                </body></html>
+                """));
+
+        DocumentParseService.ParsedBook parsed = service.parse(epub, null, null, 51L);
+
+        assertThat(parsed.chapters()).hasSize(1);
+        assertThat(parsed.chapters().get(0).title()).isEqualTo("我们生活在嘈杂、混乱的世界");
+        assertThat(parsed.chapters().get(0).hierarchyLevel()).isEqualTo(2);
+    }
+
     private void writeEpub(Path target, Map<String, ?> entries) throws IOException {
         try (ZipOutputStream output = new ZipOutputStream(java.nio.file.Files.newOutputStream(target))) {
             for (Map.Entry<String, ?> entry : entries.entrySet()) {
