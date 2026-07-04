@@ -127,6 +127,7 @@ public class ExternalMcpAgentService {
             }
 
             ExternalMcpCall call = decision.getCall();
+            applyTrustedRequestContext(state, call);
             String toolKey = key(call.getServerName(), call.getToolName());
             String summary = concise(decision.getReasoningSummary());
             state.getRefs().add("AUTO_ROUND " + round + " CALL " + toolKey
@@ -329,6 +330,32 @@ public class ExternalMcpAgentService {
         return new ExternalMcpAgentResult(
             state.getResults(), state.getRefs(), detail,
             "completed", null, state.getOriginalRequest());
+    }
+
+    private void applyTrustedRequestContext(PendingMcpAgentState state, ExternalMcpCall call) {
+        if (state == null || call == null || !"self-local".equals(normalize(call.getServerName()))) {
+            return;
+        }
+        String toolName = normalize(call.getToolName());
+        boolean userScoped = Set.of(
+            "memory_search",
+            "context_get_recent_dialogue",
+            "context_build",
+            "profile_list_categories",
+            "profile_get_category_detail",
+            "profile_search_relevant").contains(toolName);
+        if (!userScoped) {
+            return;
+        }
+
+        Map<String, Object> arguments = new LinkedHashMap<>(
+            call.getArguments() == null ? Map.of() : call.getArguments());
+        AiChatRequest request = state.getOriginalRequest();
+        arguments.put("userId", request.resolvedUserId());
+        if (Set.of("memory_search", "context_get_recent_dialogue", "context_build").contains(toolName)) {
+            arguments.put("sessionId", request.resolvedSessionId());
+        }
+        call.setArguments(arguments);
     }
 
     private ExternalMcpClarification clarificationFrom(PendingMcpInteraction pending,

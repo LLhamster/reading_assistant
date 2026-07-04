@@ -39,18 +39,23 @@ class SelfEvolutionLiveTest {
         String userId = System.getProperty("selfEvolution.userId", "default_user");
         int memoryLimit = Integer.parseInt(System.getProperty("selfEvolution.memoryLimit", "50"));
         int caseCount = Integer.parseInt(System.getProperty("selfEvolution.caseCount", "30"));
+        int maxIterations = Integer.parseInt(
+            System.getProperty("selfEvolution.maxIterations", "3"));
         long bookId = Long.parseLong(System.getProperty("selfEvolution.defaultBookId", "1"));
         int chapterIndex = Integer.parseInt(System.getProperty("selfEvolution.defaultChapterIndex", "1"));
         Path reportRoot = Path.of(System.getProperty("selfEvolution.reportDir", "target/evolution"));
 
-        SelfEvolutionReport report = service.run(userId, memoryLimit, bookId, chapterIndex, caseCount);
+        SelfEvolutionReport report = service.run(
+            userId, memoryLimit, bookId, chapterIndex,
+            new SelfEvolutionRunOptions(caseCount, maxIterations, true));
         Path output = reportWriter.write(report, reportRoot);
 
-        int expectedCount = Math.max(1, Math.min(100, caseCount));
+        int expectedCount = Math.max(1, Math.min(EvalCaseGenerator.DEFAULT_CASE_COUNT, caseCount));
         assertEquals(expectedCount, report.evalCases().size());
         assertEquals(expectedCount, report.baselineResults().size());
         assertTrue(report.candidateResults().isEmpty()
             || report.candidateResults().size() == expectedCount);
+        assertTrue(report.iterations().size() <= Math.max(1, Math.min(5, maxIterations)));
         System.out.println("Self-Evolution report: " + output.toAbsolutePath());
     }
 

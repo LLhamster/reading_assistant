@@ -149,6 +149,28 @@ docker compose up --build
 
 启动后可访问阅读页面和后端接口，默认端口为 `8080`。
 
+### 智能增量导入书籍
+
+将 EPUB 文件统一命名为：
+
+```text
+书名__作者__状态.epub
+乡土中国__费孝通__完结.epub
+某书__张三__连载中.epub
+```
+
+然后执行：
+
+```bash
+bash scripts/import-books-batch.sh \
+  --dir /home/hamster/books \
+  --filename-metadata
+```
+
+脚本会自动读取书名、作者和状态。首次运行会为历史书籍建立 SHA-256
+索引；之后通过目录中的 `.http-reading-import-state.tsv` 跳过未变化的文件，
+相同内容即使改名也不会重复导入。
+
 ---
 
 ## AI Agent Testing

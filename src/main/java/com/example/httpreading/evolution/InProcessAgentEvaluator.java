@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import com.example.httpreading.dto.AiChatRequest;
+import com.example.httpreading.service.ModelClient;
 import com.example.httpreading.service.ai.ChatPlan;
 import com.example.httpreading.service.ai.CollectedEvidence;
 import com.example.httpreading.service.ai.EvidenceItem;
@@ -29,6 +30,13 @@ public class InProcessAgentEvaluator {
     public List<AgentRun> evaluate(List<EvolutionEvalCase> cases,
                                    String variant,
                                    PromptOverride promptOverride) {
+        return evaluate(cases, variant, promptOverride, true);
+    }
+
+    public List<AgentRun> evaluate(List<EvolutionEvalCase> cases,
+                                   String variant,
+                                   PromptOverride promptOverride,
+                                   boolean deterministic) {
         List<AgentRun> results = new ArrayList<>();
         PromptOverride finalAnswerOnly = PromptOverride.finalAnswerOnly(
             promptOverride == null ? "" : promptOverride.finalAnswerPatch());
@@ -38,7 +46,11 @@ public class InProcessAgentEvaluator {
             CollectedEvidence evidence = fixedEvidence(evalCase);
             long start = System.nanoTime();
             try {
-                String answer = finalAnswerService.answer(request, plan, evidence, finalAnswerOnly);
+                ModelClient.ChatOptions chatOptions = deterministic
+                    ? ModelClient.ChatOptions.deterministic()
+                    : ModelClient.ChatOptions.defaults();
+                String answer = finalAnswerService.answer(
+                    request, plan, evidence, finalAnswerOnly, chatOptions);
                 results.add(new AgentRun(
                     evalCase.id(), answer, "completed", plan,
                     (System.nanoTime() - start) / 1_000_000, ""));

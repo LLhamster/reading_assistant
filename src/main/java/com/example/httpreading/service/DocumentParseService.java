@@ -1,6 +1,7 @@
 package com.example.httpreading.service;
 
 import java.io.IOException;
+import java.net.URLEncoder;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -12,11 +13,18 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.parser.Parser;
+import org.jsoup.safety.Cleaner;
+import org.jsoup.safety.Safelist;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline;
@@ -43,53 +51,177 @@ public class DocumentParseService {
     private static final Pattern EPUB_ITEM = Pattern.compile("<item\\b([^>]*)>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final Pattern EPUB_ITEMREF = Pattern.compile("<itemref\\b([^>]*)>", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
     private static final Pattern XML_ATTR = Pattern.compile("([\\w:.-]+)\\s*=\\s*[\"']([^\"']*)[\"']");
+    private static final Set<String> EPUB_IMAGE_EXTENSIONS = Set.of(
+        "png", "jpg", "jpeg", "gif", "webp", "svg");
+    private static final Safelist EPUB_CONTENT_SAFELIST = new Safelist()
+        .addTags("p", "div", "br", "hr", "h1", "h2", "h3", "h4", "h5", "h6",
+            "blockquote", "ul", "ol", "li", "strong", "b", "em", "i", "u", "s",
+            "sub", "sup", "pre", "code", "table", "thead", "tbody", "tfoot",
+            "tr", "th", "td", "caption", "figure", "figcaption", "img")
+        .addAttributes("img", "src", "alt", "title", "width", "height")
+        .addAttributes("td", "colspan", "rowspan")
+        .addAttributes("th", "colspan", "rowspan");
 
     public ParsedBook parse(Path sourcePath, String fallbackTitle, String fallbackAuthor) {
+        return parse(sourcePath, fallbackTitle, fallbackAuthor, 0L);
+    }
+
+    public ParsedBook parse(Path sourcePath, String fallbackTitle, String fallbackAuthor, Long bookId) {
         String filename = sourcePath.getFileName().toString();
         String extension = extension(filename);
-        List<ParsedChapter> chapters = switch (extension) {
-            case "txt", "md" -> splitText(readUtf8(sourcePath));
-            case "html", "htm" -> splitText(stripHtml(readUtf8(sourcePath)));
-            case "epub" -> parseEpub(sourcePath);
-            case "pdf" -> parsePdf(sourcePath);
+        ParsedDocument parsedDocument = switch (extension) {
+            case "txt", "md" -> new ParsedDocument(splitText(readUtf8(sourcePath)), Map.of());
+            case "html", "htm" -> new ParsedDocument(splitText(stripHtml(readUtf8(sourcePath))), Map.of());
+            case "epub" -> parseEpub(sourcePath, bookId);
+            case "pdf" -> new ParsedDocument(parsePdf(sourcePath), Map.of());
             default -> throw ErrorCode.BAD_REQUEST.toException("暂不支持的书籍格式: " + extension);
         };
-        chapters = normalizeChapters(chapters);
+        List<ParsedChapter> chapters = normalizeChapters(parsedDocument.chapters());
         if (chapters.isEmpty()) {
             throw ErrorCode.BAD_REQUEST.toException("未能从文档中抽取到可阅读文本，扫描型 PDF 需要先 OCR");
         }
         String title = isBlank(fallbackTitle) ? filenameWithoutExtension(filename) : fallbackTitle.trim();
         String author = isBlank(fallbackAuthor) ? "未知作者" : fallbackAuthor.trim();
-        return new ParsedBook(title, author, chapters);
+        return new ParsedBook(title, author, chapters, parsedDocument.assets());
     }
 
-    private List<ParsedChapter> parseEpub(Path sourcePath) {
+    private ParsedDocument parseEpub(Path sourcePath, Long bookId) {
         List<ParsedChapter> chapters = new ArrayList<>();
+        Map<String, byte[]> assets = new LinkedHashMap<>();
         try (ZipFile zipFile = new ZipFile(sourcePath.toFile(), StandardCharsets.UTF_8)) {
             List<ZipEntry> entries = epubReadingOrderEntries(zipFile);
 
             for (ZipEntry entry : entries) {
                 String html = readZipText(zipFile, entry);
+                Document document = Jsoup.parse(html, "", Parser.xmlParser());
                 String text = stripHtml(html).trim();
-                if (text.isBlank()) {
-                    continue;
-                }
-                String title = firstTagText(html, H1_TAG);
+                String title = firstText(document, "h1");
                 if (isBlank(title)) {
-                    title = firstTagText(html, TITLE_TAG);
+                    title = firstText(document, "title");
                 }
                 if (isBlank(title)) {
                     title = Path.of(entry.getName()).getFileName().toString();
                 }
-                chapters.add(new ParsedChapter(title.trim(), text));
+                rewriteAndCollectImages(zipFile, entry, document, bookId, assets);
+                String contentHtml = sanitizeEpubContent(document);
+                if (text.isBlank() && !contentHtml.contains("<img")) {
+                    continue;
+                }
+                chapters.add(new ParsedChapter(null, null, title.trim(), text, contentHtml));
             }
         } catch (IOException e) {
             throw ErrorCode.BAD_REQUEST.toException("EPUB 解析失败: " + e.getMessage());
         }
-        if (chapters.size() == 1) {
-            return splitText(chapters.get(0).content());
+        if (chapters.size() == 1 && assets.isEmpty()) {
+            ParsedChapter only = chapters.get(0);
+            List<ParsedChapter> split = splitText(only.content());
+            if (split.size() > 1) {
+                return new ParsedDocument(split, Map.of());
+            }
         }
-        return chapters;
+        return new ParsedDocument(chapters, assets);
+    }
+
+    private void rewriteAndCollectImages(ZipFile zipFile,
+                                         ZipEntry chapterEntry,
+                                         Document document,
+                                         Long bookId,
+                                         Map<String, byte[]> assets) throws IOException {
+        for (Element image : document.select("img[src]")) {
+            String source = image.attr("src").trim();
+            String assetPath = resolveInternalImagePath(chapterEntry.getName(), source);
+            if (assetPath == null) {
+                replaceInvalidImage(image);
+                continue;
+            }
+            ZipEntry assetEntry = zipFile.getEntry(assetPath);
+            if (assetEntry == null || assetEntry.isDirectory()) {
+                replaceInvalidImage(image);
+                continue;
+            }
+            byte[] bytes = zipFile.getInputStream(assetEntry).readAllBytes();
+            if (!isSupportedImage(assetPath, bytes)) {
+                replaceInvalidImage(image);
+                continue;
+            }
+            assets.putIfAbsent(assetPath, bytes);
+            String encodedPath = URLEncoder.encode(assetPath, StandardCharsets.UTF_8);
+            image.attr("src", "/api/books/" + bookId + "/assets?path=" + encodedPath);
+            image.removeAttr("srcset");
+            image.removeAttr("style");
+        }
+    }
+
+    private String resolveInternalImagePath(String chapterPath, String source) {
+        if (source == null || source.isBlank() || source.startsWith("#")
+            || source.startsWith("//") || source.contains("://")
+            || source.regionMatches(true, 0, "data:", 0, 5)
+            || source.regionMatches(true, 0, "javascript:", 0, 11)) {
+            return null;
+        }
+        String withoutFragment = source.split("[?#]", 2)[0];
+        String resolved = resolveZipPath(parentZipPath(chapterPath), withoutFragment);
+        return hasSupportedImageExtension(resolved) ? resolved : null;
+    }
+
+    private void replaceInvalidImage(Element image) {
+        String alt = image.attr("alt");
+        if (alt == null || alt.isBlank()) {
+            image.remove();
+        } else {
+            image.before(new org.jsoup.nodes.TextNode(alt));
+            image.remove();
+        }
+    }
+
+    private String sanitizeEpubContent(Document source) {
+        Document shell = Document.createShell("");
+        shell.body().html(source.body() == null ? "" : source.body().html());
+        Document cleaned = new Cleaner(EPUB_CONTENT_SAFELIST).clean(shell);
+        cleaned.outputSettings().prettyPrint(false);
+        return cleaned.body().html();
+    }
+
+    private String firstText(Document document, String selector) {
+        Element element = document.selectFirst(selector);
+        return element == null ? "" : element.text().trim();
+    }
+
+    private boolean hasSupportedImageExtension(String path) {
+        int dot = path == null ? -1 : path.lastIndexOf('.');
+        if (dot < 0 || dot == path.length() - 1) {
+            return false;
+        }
+        return EPUB_IMAGE_EXTENSIONS.contains(path.substring(dot + 1).toLowerCase(Locale.ROOT));
+    }
+
+    private boolean isSupportedImage(String path, byte[] bytes) {
+        if (!hasSupportedImageExtension(path) || bytes == null || bytes.length < 4) {
+            return false;
+        }
+        String lower = path.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".png")) {
+            return bytes.length >= 8 && bytes[0] == (byte) 0x89 && bytes[1] == 0x50
+                && bytes[2] == 0x4e && bytes[3] == 0x47;
+        }
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+            return bytes[0] == (byte) 0xff && bytes[1] == (byte) 0xd8;
+        }
+        if (lower.endsWith(".gif")) {
+            return new String(bytes, 0, Math.min(6, bytes.length), StandardCharsets.US_ASCII)
+                .startsWith("GIF8");
+        }
+        if (lower.endsWith(".webp")) {
+            return bytes.length >= 12
+                && "RIFF".equals(new String(bytes, 0, 4, StandardCharsets.US_ASCII))
+                && "WEBP".equals(new String(bytes, 8, 4, StandardCharsets.US_ASCII));
+        }
+        if (lower.endsWith(".svg")) {
+            String prefix = new String(bytes, 0, Math.min(bytes.length, 4096), StandardCharsets.UTF_8)
+                .toLowerCase(Locale.ROOT);
+            return prefix.contains("<svg");
+        }
+        return false;
     }
 
     private List<ZipEntry> epubReadingOrderEntries(ZipFile zipFile) throws IOException {
@@ -334,11 +466,12 @@ public class DocumentParseService {
         List<ParsedChapter> normalized = new ArrayList<>();
         for (ParsedChapter chapter : chapters) {
             String content = normalizeText(chapter.content());
-            if (content.isBlank()) {
+            if (content.isBlank() && isBlank(chapter.contentHtml())) {
                 continue;
             }
             String title = isBlank(chapter.title()) ? "全文" : chapter.title().trim();
-            normalized.add(new ParsedChapter(chapter.volumeIndex(), chapter.volumeTitle(), title, content));
+            normalized.add(new ParsedChapter(
+                chapter.volumeIndex(), chapter.volumeTitle(), title, content, chapter.contentHtml()));
         }
         if (normalized.size() == 1 && "全文".equals(normalized.get(0).title())) {
             return normalized;
@@ -346,7 +479,9 @@ public class DocumentParseService {
         for (int i = 0; i < normalized.size(); i++) {
             ParsedChapter chapter = normalized.get(i);
             if ("全文".equals(chapter.title())) {
-                normalized.set(i, new ParsedChapter(chapter.volumeIndex(), chapter.volumeTitle(), "第" + (i + 1) + "章", chapter.content()));
+                normalized.set(i, new ParsedChapter(
+                    chapter.volumeIndex(), chapter.volumeTitle(), "第" + (i + 1) + "章",
+                    chapter.content(), chapter.contentHtml()));
             }
         }
         return normalized;
@@ -613,13 +748,30 @@ public class DocumentParseService {
         return value == null || value.isBlank();
     }
 
-    public record ParsedBook(String title, String author, List<ParsedChapter> chapters) {
+    public record ParsedBook(String title,
+                             String author,
+                             List<ParsedChapter> chapters,
+                             Map<String, byte[]> assets) {
+        public ParsedBook(String title, String author, List<ParsedChapter> chapters) {
+            this(title, author, chapters, Map.of());
+        }
     }
 
-    public record ParsedChapter(Integer volumeIndex, String volumeTitle, String title, String content) {
+    public record ParsedChapter(Integer volumeIndex,
+                                String volumeTitle,
+                                String title,
+                                String content,
+                                String contentHtml) {
         public ParsedChapter(String title, String content) {
-            this(null, null, title, content);
+            this(null, null, title, content, null);
         }
+
+        public ParsedChapter(Integer volumeIndex, String volumeTitle, String title, String content) {
+            this(volumeIndex, volumeTitle, title, content, null);
+        }
+    }
+
+    private record ParsedDocument(List<ParsedChapter> chapters, Map<String, byte[]> assets) {
     }
 
     private record PdfOutlineEntry(String title, int pageIndex, Integer volumeIndex, String volumeTitle) {

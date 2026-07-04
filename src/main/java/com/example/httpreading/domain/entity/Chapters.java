@@ -8,6 +8,9 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 @Entity
 @Table(name = "chapter")
@@ -37,6 +40,12 @@ public class Chapters {
     @Column(name = "content_file_path")
     private String contentFilePath;
 
+    @Column(name = "render_content_file_path")
+    private String renderContentFilePath;
+
+    @Transient
+    private String contentHtml;
+
     @Column(name = "volume_index")
     private Integer volumeIndex;
 
@@ -50,6 +59,24 @@ public class Chapters {
 
     public void setContentFilePath(String contentFilePath) {
         this.contentFilePath = contentFilePath;
+    }
+
+    @JsonIgnore
+    public String getRenderContentFilePath() {
+        return renderContentFilePath;
+    }
+
+    public void setRenderContentFilePath(String renderContentFilePath) {
+        this.renderContentFilePath = renderContentFilePath;
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public String getContentHtml() {
+        return contentHtml;
+    }
+
+    public void setContentHtml(String contentHtml) {
+        this.contentHtml = contentHtml;
     }
 
     public Integer getVolumeIndex() {

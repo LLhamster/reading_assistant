@@ -35,6 +35,12 @@ public class Books {
     @Column(name = "source_format")
     private String sourceFormat;
 
+    @Column(name = "source_hash", length = 64, unique = true)
+    private String sourceHash;
+
+    @Column(name = "source_original_name")
+    private String sourceOriginalName;
+
     @Column(name = "parse_status")
     private String parseStatus;
 
@@ -120,6 +126,22 @@ public class Books {
 
     public void setSourceFormat(String sourceFormat) {
         this.sourceFormat = sourceFormat;
+    }
+
+    public String getSourceHash() {
+        return sourceHash;
+    }
+
+    public void setSourceHash(String sourceHash) {
+        this.sourceHash = sourceHash;
+    }
+
+    public String getSourceOriginalName() {
+        return sourceOriginalName;
+    }
+
+    public void setSourceOriginalName(String sourceOriginalName) {
+        this.sourceOriginalName = sourceOriginalName;
     }
 
     public String getParseStatus() {

@@ -39,6 +39,9 @@ class EvalCaseGeneratorTest {
         assertFalse(first.mcpResults().isEmpty());
         assertEquals(2, first.expectedBehavior().scoringCriteria().size());
         assertEquals(2.0, first.expectedBehavior().maxScore());
+        assertEquals(10, cases.stream()
+            .map(evalCase -> evalCase.boundarySpec().boundary())
+            .distinct().count());
     }
 
     @Test
@@ -47,6 +50,16 @@ class EvalCaseGeneratorTest {
 
         assertEquals(30, cases.size());
         assertEquals(7, cases.stream().map(EvolutionEvalCase::expectedFailureType).distinct().count());
+        assertEquals(10, cases.stream()
+            .map(evalCase -> evalCase.boundarySpec().boundary())
+            .distinct().count());
+        for (ReadingBoundary boundary : ReadingBoundary.values()) {
+            assertEquals(3, cases.stream()
+                .filter(evalCase -> evalCase.boundarySpec().boundary() == boundary)
+                .count());
+        }
+        assertTrue(cases.stream().noneMatch(evalCase ->
+            evalCase.request().getQuestion().matches(".*（变体\\d+）.*")));
         assertTrue(cases.stream().noneMatch(evalCase ->
             evalCase.request().getQuestion().contains("这个观点")));
         assertTrue(cases.stream().allMatch(evalCase ->
@@ -69,17 +82,32 @@ class EvalCaseGeneratorTest {
     }
 
     @Test
-    void mapsEvidenceUseModeFromTaskSemanticsInsteadOfExampleDetails() {
-        List<EvolutionEvalCase> common = generator.generate(List.of(), "u1", 2L, 4, 7);
+    void tenCasesCoverEveryBoundaryEvenWithARealSignal() {
+        MisunderstandingSignal signal = new MisunderstandingSignal(
+            "s1", "m1", "问题：讲完整故事\n结论：态度发生变化",
+            FailureType.MISSING_STORY_DETAIL, 0.9, 9L, 3, Map.of());
 
-        assertTrue(common.stream()
-            .filter(value -> value.expectedFailureType() != FailureType.MISSING_STORY_DETAIL)
-            .allMatch(value -> value.expectedBehavior().evidencePolicy().evidenceUseMode()
-                == EvidenceUseMode.PEDAGOGICAL_ILLUSTRATION));
-        assertTrue(common.stream()
-            .filter(value -> value.expectedFailureType() == FailureType.MISSING_STORY_DETAIL)
-            .allMatch(value -> value.expectedBehavior().evidencePolicy().evidenceUseMode()
-                == EvidenceUseMode.SOURCE_GROUNDED_NARRATIVE));
+        List<EvolutionEvalCase> cases =
+            generator.generate(List.of(signal), "u1", 1L, 1, 10);
+
+        assertEquals(10, cases.size());
+        assertEquals(10, cases.stream()
+            .map(evalCase -> evalCase.boundarySpec().boundary())
+            .distinct().count());
+    }
+
+    @Test
+    void mapsEvidenceUseModeFromTaskSemanticsInsteadOfExampleDetails() {
+        List<EvolutionEvalCase> common = generator.generate(List.of(), "u1", 2L, 4, 10);
+
+        assertEquals(EvidenceUseMode.STRICT_SOURCE,
+            modeFor(common, ReadingBoundary.DIRECT_TEXT_FACT));
+        assertEquals(EvidenceUseMode.STRICT_SOURCE,
+            modeFor(common, ReadingBoundary.INSUFFICIENT_EVIDENCE));
+        assertEquals(EvidenceUseMode.SOURCE_GROUNDED_NARRATIVE,
+            modeFor(common, ReadingBoundary.SOURCE_NARRATIVE));
+        assertEquals(EvidenceUseMode.PEDAGOGICAL_ILLUSTRATION,
+            modeFor(common, ReadingBoundary.PEDAGOGICAL_EXAMPLE));
 
         MisunderstandingSignal strictSignal = new MisunderstandingSignal(
             "strict", "m1", "问题：只根据原文回答，不要补充任何例子。\n结论：原文说明资源有限。",
@@ -151,5 +179,15 @@ class EvalCaseGeneratorTest {
         verifyNoInteractions(modelClient);
         assertTrue(cases.stream().allMatch(evalCase ->
             evalCase.expectedBehavior().evidencePolicy().evidenceUseMode() != null));
+    }
+
+    private EvidenceUseMode modeFor(List<EvolutionEvalCase> cases, ReadingBoundary boundary) {
+        return cases.stream()
+            .filter(evalCase -> evalCase.boundarySpec().boundary() == boundary)
+            .findFirst()
+            .orElseThrow()
+            .expectedBehavior()
+            .evidencePolicy()
+            .evidenceUseMode();
     }
 }

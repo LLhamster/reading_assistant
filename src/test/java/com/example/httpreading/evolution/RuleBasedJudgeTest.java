@@ -119,7 +119,8 @@ class RuleBasedJudgeTest {
             500);
         return new EvolutionEvalCase(
             "c1", "s1", request, type, List.of(), 0, "",
-            List.of(), List.of(), List.of(), null, behavior, "MEDIUM", "TEST");
+            List.of(), List.of(), List.of(), null, behavior,
+            ReadingBoundarySpec.defaultSpec(), "MEDIUM", "TEST");
     }
 
     private InProcessAgentEvaluator.AgentRun run(String answer) {

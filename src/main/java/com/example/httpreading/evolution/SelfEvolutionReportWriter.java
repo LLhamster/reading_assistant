@@ -69,10 +69,14 @@ public class SelfEvolutionReportWriter {
         output.put("expected_behavior", evalCase.expectedBehavior());
         output.put("difficulty", evalCase.difficulty());
         output.put("category", evalCase.category());
+        output.put("reading_boundary", evalCase.boundarySpec());
         output.put("source", "self_evolution");
         output.put("split", "dev");
         output.put("provenance", Map.of(
             "signal_id", evalCase.signalId(),
+            "boundary_id", evalCase.boundarySpec().boundary().name(),
+            "evidence_completeness", evalCase.boundarySpec().evidenceCompleteness().name(),
+            "conversation_state", evalCase.boundarySpec().conversationState().name(),
             "expected_failure_type", evalCase.expectedFailureType().name(),
             "reviewed", false));
         return output;
@@ -95,12 +99,23 @@ public class SelfEvolutionReportWriter {
         }
         text
             .append("- experiment valid: ").append(report.experimentValid()).append('\n')
-            .append("- candidate better: ").append(report.candidateBetter()).append("\n\n")
+            .append("- candidate better: ").append(report.candidateBetter()).append('\n')
+            .append("- candidate iterations: ").append(report.iterations().size()).append('\n')
+            .append("- selected iteration: ")
+            .append(report.selectedIteration() == null ? "none" : report.selectedIteration())
+            .append('\n')
+            .append("- stop reason: ").append(report.stopReason().isBlank() ? "n/a" : report.stopReason())
+            .append("\n\n")
             .append("- generated dataset: eval-cases.jsonl\n\n")
+            .append(boundaryCoverage(report.evalCases()))
+            .append(iterationSummary(report))
             .append("## Recommendation\n\n")
             .append(report.recommendation()).append("\n\n")
             .append("## Candidate FinalAnswer Evolvable Patch\n\n")
-            .append("固定契约未修改；以下内容仅追加到 FinalAnswer 的可进化策略区。\n\n```text\n")
+            .append(report.candidateBetter()
+                ? "以下是严格胜出的候选；固定契约未修改。\n\n"
+                : "以下是最佳尝试候选，未自动采用；固定契约未修改。\n\n")
+            .append("```text\n")
             .append(report.candidatePrompt().finalAnswerPatch()).append("\n```\n\n")
             .append("## Effective FinalAnswer Evolvable Policy\n\n")
             .append("以下是默认可进化策略追加候选 patch 后，本轮 candidate 实际使用的完整策略区。")
@@ -125,6 +140,71 @@ public class SelfEvolutionReportWriter {
             appendResult(text, "Candidate", candidate);
         }
         return text.toString();
+    }
+
+    private String iterationSummary(SelfEvolutionReport report) {
+        if (report.iterations().isEmpty()) return "";
+        StringBuilder text = new StringBuilder()
+            .append("## Candidate Iterations\n\n")
+            .append("| Iteration | Score | Pass rate | Hard failures | Safety | Fixed | Persistent | Regressions | Winner |\n")
+            .append("|---:|---:|---:|---:|---|---:|---:|---:|---|\n");
+        for (EvolutionIterationResult iteration : report.iterations()) {
+            text.append("| ").append(iteration.iteration())
+                .append(" | ").append(format(iteration.aggregate().averageScore()))
+                .append(" | ").append(format(iteration.aggregate().passRate()))
+                .append(" | ").append(iteration.aggregate().hardFailures())
+                .append(" | ").append(iteration.safetyPassed())
+                .append(" | ").append(iteration.fixedCaseIds().size())
+                .append(" | ").append(iteration.persistentFailureCaseIds().size())
+                .append(" | ").append(iteration.regressionCaseIds().size())
+                .append(" | ").append(iteration.beatsBaseline())
+                .append(" |\n");
+        }
+        text.append('\n');
+        for (EvolutionIterationResult iteration : report.iterations()) {
+            text.append("### Iteration ").append(iteration.iteration()).append(" Patch\n\n")
+                .append("- fixed: ").append(iteration.fixedCaseIds()).append('\n')
+                .append("- persistent: ").append(iteration.persistentFailureCaseIds()).append('\n')
+                .append("- regressions: ").append(iteration.regressionCaseIds()).append("\n\n")
+                .append("```text\n")
+                .append(iteration.prompt().finalAnswerPatch())
+                .append("\n```\n\n");
+        }
+        return text.toString();
+    }
+
+    private String boundaryCoverage(List<EvolutionEvalCase> cases) {
+        Map<ReadingBoundary, List<EvolutionEvalCase>> byBoundary = cases.stream()
+            .collect(Collectors.groupingBy(
+                evalCase -> evalCase.boundarySpec().boundary(),
+                LinkedHashMap::new,
+                Collectors.toList()));
+        StringBuilder text = new StringBuilder()
+            .append("## Reading Boundary Coverage\n\n")
+            .append("- covered boundaries: ")
+            .append(byBoundary.size()).append('/').append(ReadingBoundary.values().length)
+            .append("\n\n")
+            .append("| Boundary | Cases | Evidence modes | Completeness | Conversation states |\n")
+            .append("|---|---:|---|---|---|\n");
+        for (ReadingBoundary boundary : ReadingBoundary.values()) {
+            List<EvolutionEvalCase> matching = byBoundary.getOrDefault(boundary, List.of());
+            text.append("| ").append(boundary).append(" | ").append(matching.size()).append(" | ")
+                .append(joinDistinct(matching.stream().map(evalCase ->
+                    evalCase.expectedBehavior().evidencePolicy().evidenceUseMode().name()).toList()))
+                .append(" | ")
+                .append(joinDistinct(matching.stream().map(evalCase ->
+                    evalCase.boundarySpec().evidenceCompleteness().name()).toList()))
+                .append(" | ")
+                .append(joinDistinct(matching.stream().map(evalCase ->
+                    evalCase.boundarySpec().conversationState().name()).toList()))
+                .append(" |\n");
+        }
+        return text.append('\n').toString();
+    }
+
+    private String joinDistinct(List<String> values) {
+        String joined = values.stream().distinct().collect(Collectors.joining(", "));
+        return joined.isBlank() ? "—" : joined;
     }
 
     private void appendCaseHeader(StringBuilder text, EvolutionEvalCase evalCase) {

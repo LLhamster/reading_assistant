@@ -39,7 +39,20 @@ class SelfEvolutionReportWriterTest {
             "run-1", "u1", List.of(), List.of(evalCase),
             List.of(result), List.of(result),
             PromptOverride.finalAnswerOnly("先声明无依据内容，再开始连续场景。"),
-            aggregate, aggregate, true, false, "保留 baseline");
+            aggregate, aggregate, true, false, "保留 baseline",
+            List.of(new EvolutionIterationResult(
+                1,
+                PromptOverride.finalAnswerOnly("先声明无依据内容，再开始连续场景。"),
+                List.of(result),
+                aggregate,
+                true,
+                false,
+                false,
+                List.of(),
+                List.of(evalCase.id()),
+                List.of())),
+            null,
+            "MAX_ITERATIONS_REACHED");
 
         Path output = new SelfEvolutionReportWriter(new ObjectMapper()).write(report, tempDir);
         String jsonl = Files.readString(output.resolve("eval-cases.jsonl"));
@@ -54,6 +67,8 @@ class SelfEvolutionReportWriterTest {
         assertTrue(jsonl.contains("\"evidence_policy\""));
         assertTrue(jsonl.contains("\"evidence_use_mode\""));
         assertTrue(jsonl.contains("\"final_answer_input\""));
+        assertTrue(jsonl.contains("\"reading_boundary\""));
+        assertTrue(jsonl.contains("\"boundary_id\""));
         assertTrue(!jsonl.contains("\"must_include\""));
         assertTrue(!jsonl.contains("\"must_not_include\""));
         assertTrue(!jsonl.contains("\"style_constraints\""));
@@ -73,6 +88,11 @@ class SelfEvolutionReportWriterTest {
         assertTrue(markdown.contains("例子二"));
         assertTrue(!markdown.contains("例子三"));
         assertTrue(markdown.contains("Effective FinalAnswer Evolvable Policy"));
+        assertTrue(markdown.contains("Candidate Iterations"));
+        assertTrue(markdown.contains("Iteration 1 Patch"));
+        assertTrue(markdown.contains("stop reason: MAX_ITERATIONS_REACHED"));
+        assertTrue(markdown.contains("Reading Boundary Coverage"));
+        assertTrue(markdown.contains("covered boundaries: 1/10"));
         assertTrue(markdown.contains("先声明无依据内容，再开始连续场景。"));
 
         String json = Files.readString(output.resolve("report.json"));

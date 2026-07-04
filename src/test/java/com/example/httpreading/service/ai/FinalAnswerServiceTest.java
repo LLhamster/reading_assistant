@@ -30,6 +30,26 @@ class FinalAnswerServiceTest {
     }
 
     @Test
+    void deterministicExperimentalOptionIsUsedForAnswerAndRepairOnlyInThatCall() {
+        ModelClient modelClient = mock(ModelClient.class);
+        when(modelClient.chat(
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.any(ModelClient.ChatOptions.class)))
+            .thenReturn("简单说，只有抽象概念。")
+            .thenReturn("一个具体故事，包含起点、变化和结果。");
+        FinalAnswerService service = new FinalAnswerService(modelClient);
+
+        String answer = service.answer(
+            request(), plan(), evidence(), PromptOverride.none(),
+            ModelClient.ChatOptions.deterministic());
+
+        assertTrue(answer.contains("具体故事"));
+        verify(modelClient, times(2)).chat(
+            org.mockito.ArgumentMatchers.anyString(),
+            org.mockito.ArgumentMatchers.eq(ModelClient.ChatOptions.deterministic()));
+    }
+
+    @Test
     void promptRequiresPlainNaturalReadingAnswerStyle() {
         FinalAnswerService service = new FinalAnswerService(mock(ModelClient.class));
 

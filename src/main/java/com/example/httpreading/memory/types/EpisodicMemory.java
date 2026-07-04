@@ -203,9 +203,6 @@ public class EpisodicMemory extends BaseMemory {
             outcome,
             itemImportance);
 
-        episodes.add(episode);
-        sessions.computeIfAbsent(sessionId, key -> new ArrayList<>()).add(memoryItem.getId());
-
         long ts = memoryItem.getTimestamp() == null
             ? LocalDateTime.now().atZone(java.time.ZoneId.systemDefault()).toEpochSecond()
             : memoryItem.getTimestamp().atZone(java.time.ZoneId.systemDefault()).toEpochSecond();
@@ -233,6 +230,13 @@ public class EpisodicMemory extends BaseMemory {
             (double) itemImportance,
             properties);
 
+        // MySQL is the durable source of truth. Only expose the episode through
+        // the process-local cache after the durable write has committed.
+        episodes.add(episode);
+        sessions.computeIfAbsent(sessionId, key -> new ArrayList<>()).add(memoryItem.getId());
+
+        // Qdrant is a rebuildable retrieval index. A failed/missing vector must
+        // never make an already committed episodic memory disappear.
         persistToQdrant(memoryItem, sessionId, context, outcome, itemImportance, ts, properties);
         return storedId;
     }
@@ -246,15 +250,14 @@ public class EpisodicMemory extends BaseMemory {
         Long endTime = readEpochSeconds(kwargs, "endTime", "end_time");
 
         int candidateLimit = Math.max(limit * 20, 100);
-        List<Map<String, Object>> docs = qdrantStore != null
-            ? searchFromQdrant(query, candidateLimit, userId, sessionId, importanceThreshold)
-            : docStore.searchMemory(
-                userId,
-                "episodic",
-                startTime,
-                endTime,
-                importanceThreshold,
-                candidateLimit);
+        List<Map<String, Object>> docs = persistentCandidates(
+            query,
+            candidateLimit,
+            userId,
+            sessionId,
+            importanceThreshold,
+            startTime,
+            endTime);
 
         if (docs == null || docs.isEmpty()) {
             return new ArrayList<>();
@@ -318,6 +321,57 @@ public class EpisodicMemory extends BaseMemory {
             .limit(limit)
             .map(ScoredItem::item)
             .collect(Collectors.toList());
+    }
+
+    /**
+     * MySQL is authoritative; Qdrant only broadens semantic candidate selection.
+     * This makes episodic memories retrievable after a restart even when the
+     * vector index is empty, stale, or temporarily unavailable.
+     */
+    private List<Map<String, Object>> persistentCandidates(String query,
+                                                           int candidateLimit,
+                                                           String userId,
+                                                           String sessionId,
+                                                           Double importanceThreshold,
+                                                           Long startTime,
+                                                           Long endTime) {
+        List<Map<String, Object>> durableDocs = docStore.searchMemory(
+            userId,
+            "episodic",
+            startTime,
+            endTime,
+            importanceThreshold,
+            candidateLimit);
+        if (qdrantStore == null) {
+            return durableDocs == null ? List.of() : durableDocs;
+        }
+
+        Map<String, Map<String, Object>> candidates = new java.util.LinkedHashMap<>();
+        try {
+            for (Map<String, Object> indexedDoc
+                : searchFromQdrant(query, candidateLimit, userId, sessionId, importanceThreshold)) {
+                String memoryId = Objects.toString(indexedDoc.get("memory_id"), "");
+                if (memoryId.isBlank()) {
+                    continue;
+                }
+                Map<String, Object> durableDoc = docStore.getMemory(memoryId);
+                if (durableDoc != null) {
+                    candidates.put(memoryId, durableDoc);
+                }
+            }
+        } catch (Exception exception) {
+            logger.warn("Qdrant 情景记忆检索失败，使用 MySQL 持久化记忆: {}", exception.getMessage());
+        }
+
+        if (durableDocs != null) {
+            for (Map<String, Object> durableDoc : durableDocs) {
+                String memoryId = Objects.toString(durableDoc.get("memory_id"), "");
+                if (!memoryId.isBlank()) {
+                    candidates.put(memoryId, durableDoc);
+                }
+            }
+        }
+        return new ArrayList<>(candidates.values());
     }
 
     @Override

@@ -21,6 +21,7 @@ public record EvolutionEvalCase(String id,
                                 List<McpResult> mcpResults,
                                 FinalAnswerInput finalAnswerInput,
                                 ExpectedBehavior expectedBehavior,
+                                ReadingBoundarySpec boundarySpec,
                                 String difficulty,
                                 String category) {
     public EvolutionEvalCase {
@@ -37,6 +38,9 @@ public record EvolutionEvalCase(String id,
             ? FinalAnswerInput.defaultFor(request)
             : finalAnswerInput;
         expectedBehavior = expectedBehavior == null ? ExpectedBehavior.empty() : expectedBehavior;
+        boundarySpec = boundarySpec == null
+            ? ReadingBoundarySpec.defaultSpec()
+            : boundarySpec;
         difficulty = safe(difficulty);
         category = safe(category);
     }
@@ -50,7 +54,8 @@ public record EvolutionEvalCase(String id,
                              String previousAnswer) {
         this(id, signalId, request, expectedFailureType, anchorTerms, minimumAnswerChars, previousAnswer,
             List.of(), List.of(), List.of(), FinalAnswerInput.defaultFor(request),
-            ExpectedBehavior.empty(), "MEDIUM", expectedFailureType.name());
+            ExpectedBehavior.empty(), ReadingBoundarySpec.defaultSpec(),
+            "MEDIUM", expectedFailureType.name());
     }
 
     public record DialogueTurn(String role, String content) {

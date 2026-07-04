@@ -656,6 +656,39 @@
       background: var(--border);
     }
 
+    .reader-nav button:disabled,
+    .reader-bottom-nav button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .reader-bottom-nav {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      margin-top: 48px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+    }
+
+    .reader-bottom-nav button {
+      min-width: 112px;
+      padding: 11px 20px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      font-family: inherit;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .reader-bottom-nav button:hover:not(:disabled) {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
     .reader-style-toolbar {
       display: flex;
       align-items: center;
@@ -696,11 +729,73 @@
       font-family: 'Cormorant Garamond', Georgia, serif;
     }
 
+    .reader-chapter-title {
+      margin: 0 0 24px;
+      font: inherit;
+      font-size: 1.5em;
+      font-weight: 600;
+      line-height: 1.45;
+    }
+
+    .reader-rich-body {
+      white-space: normal;
+    }
+
+    .reader-rich-body p,
+    .reader-rich-body blockquote,
+    .reader-rich-body ul,
+    .reader-rich-body ol,
+    .reader-rich-body pre,
+    .reader-rich-body table,
+    .reader-rich-body figure {
+      margin: 0 0 1.2em;
+    }
+
+    .reader-rich-body img {
+      display: block;
+      max-width: 100%;
+      height: auto;
+      margin: 1.4em auto;
+      object-fit: contain;
+    }
+
+    .reader-rich-body sup img[alt="note"] {
+      display: inline-block;
+      width: 0.8em;
+      height: 0.8em;
+      margin: 0 0.12em;
+      vertical-align: baseline;
+    }
+
+    .reader-rich-body figure {
+      text-align: center;
+    }
+
+    .reader-rich-body figcaption {
+      color: var(--text-muted);
+      font-size: 0.9em;
+      line-height: 1.6;
+    }
+
+    .reader-rich-body table {
+      display: block;
+      max-width: 100%;
+      overflow-x: auto;
+      border-collapse: collapse;
+    }
+
+    .reader-rich-body th,
+    .reader-rich-body td {
+      border: 1px solid var(--border);
+      padding: 6px 10px;
+    }
+
     /* ========== AI阅读侧栏 ========== */
     .ai-panel {
       background: var(--bg-secondary);
       border-radius: 16px;
       border: 1px solid var(--border);
+      min-width: 0;
       min-height: calc(100vh - var(--nav-height) - 112px);
       max-height: calc(100vh - var(--nav-height) - 48px);
       display: flex;
@@ -784,6 +879,7 @@
 
     .ai-messages {
       flex: 1;
+      min-width: 0;
       overflow-y: auto;
       padding: 18px;
       display: flex;
@@ -793,6 +889,8 @@
     }
 
     .ai-message {
+      width: 100%;
+      min-width: 0;
       max-width: 100%;
       display: flex;
       flex-direction: column;
@@ -875,6 +973,11 @@
     }
 
     .ai-meta-block {
+      width: 100%;
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box;
+      overflow: hidden;
       background: rgba(255,255,255,0.72);
       border: 1px solid var(--border);
       border-radius: 10px;
@@ -897,6 +1000,10 @@
 
     .ai-meta-list li {
       margin: 4px 0;
+      min-width: 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
 
     .ai-interaction {
@@ -1326,8 +1433,8 @@
       <div class="reader-subtitle" id="readerBookSub"></div>
 
       <div class="reader-nav">
-        <button onclick="prevChapter()">上一章</button>
-        <button onclick="nextChapter()">下一章</button>
+        <button id="topPrevChapterBtn" onclick="prevChapter()" disabled>上一章</button>
+        <button id="topNextChapterBtn" onclick="nextChapter()" disabled>下一章</button>
         <select id="chapterSelect" onchange="jumpChapter()"></select>
         <button onclick="addCurrentBookToShelf()" style="margin-left:auto;">加入书架</button>
       </div>
@@ -1350,6 +1457,11 @@
 
       <div class="reader-content" id="chapterContent">
 在这里开始您的阅读之旅...
+      </div>
+
+      <div class="reader-bottom-nav" id="readerBottomNav">
+        <button id="bottomPrevChapterBtn" onclick="prevChapter()" disabled>← 上一章</button>
+        <button id="bottomNextChapterBtn" onclick="nextChapter()" disabled>下一章 →</button>
       </div>
     </main>
 
@@ -1518,6 +1630,8 @@ let profileUpdating = false;
 let profileStyleLoading = false;
 let profileStyleSaving = false;
 let selectedReadingContext = null;
+let readingProgressSaveTimer = null;
+let suppressReadingProgressTracking = false;
 const guestUserId = 'guest_' + Date.now();
 const defaultReaderStyle = { fontSize: 16, lineHeight: '2', font: 'serif' };
 let readerStyle = { ...defaultReaderStyle };
@@ -1866,8 +1980,11 @@ async function startShelfRag(bookId) {
 }
 
 async function openBook(bookId) {
+  if (currentBookId) {
+    await saveReadingProgress();
+  }
   currentBookId = bookId;
-  currentChapterIndex = 1;
+  suppressReadingProgressTracking = true;
   try {
     const book = await api('GET', '/api/books/' + bookId);
     document.getElementById('readerBookTitle').textContent = book.title;
@@ -1875,8 +1992,22 @@ async function openBook(bookId) {
     chaptersCache = await api('GET', '/api/books/' + bookId + '/chapters');
     const select = document.getElementById('chapterSelect');
     renderChapterOptions(select, chaptersCache);
+    const progress = hasAuthUser()
+      ? await api('GET', '/api/user/books/' + bookId + '/progress').catch(() => null)
+      : null;
+    const availableIndexes = chaptersCache.map(chapter => chapter.chapterIndex);
+    currentChapterIndex = progress && availableIndexes.includes(progress.chapterIndex)
+      ? progress.chapterIndex
+      : (availableIndexes[0] || 1);
     await loadCurrentChapter();
-  } catch (e) { console.error(e); }
+    await restoreReadingOffset(progress ? progress.offset : 0);
+  } catch (e) {
+    console.error(e);
+  } finally {
+    window.setTimeout(() => {
+      suppressReadingProgressTracking = false;
+    }, 300);
+  }
 }
 
 function renderChapterOptions(select, chapters) {
@@ -1914,23 +2045,205 @@ async function loadCurrentChapter() {
     const chapter = await api('GET', '/api/books/' + currentBookId + '/chapters/' + currentChapterIndex);
     currentChapterTitle = chapter.title || '';
     currentChapterContent = chapter.content || '';
-    document.getElementById('chapterContent').textContent = chapter.title + '\n\n' + chapter.content;
+    renderChapterContent(chapter);
     selectedReadingContext = null;
     renderSelectedReadingContext();
     document.getElementById('chapterSelect').value = currentChapterIndex;
+    updateChapterNavigationState();
     prepareAiForCurrentChapter(chapter);
   } catch (e) { console.error(e); }
 }
 
-function prevChapter() { if (currentBookId && currentChapterIndex > 1) { currentChapterIndex--; loadCurrentChapter(); } }
-function nextChapter() {
+function renderChapterContent(chapter) {
+  const container = document.getElementById('chapterContent');
+  container.replaceChildren();
+
+  const title = document.createElement('h1');
+  title.className = 'reader-chapter-title';
+  title.textContent = chapter.title || '';
+  container.appendChild(title);
+
+  if (chapter.contentHtml) {
+    const body = document.createElement('div');
+    body.className = 'reader-rich-body';
+    body.innerHTML = chapter.contentHtml;
+    if (hasLeadingMatchingHeading(body, chapter.title || '')) {
+      title.remove();
+    }
+    container.appendChild(body);
+    return;
+  }
+
+  container.appendChild(document.createTextNode(chapter.content || ''));
+}
+
+function hasLeadingMatchingHeading(body, chapterTitle) {
+  const titleKey = normalizeHeadingText(chapterTitle);
+  if (!titleKey) return false;
+
+  const leadingHeadings = [];
+  let element = findLeadingHeading(body);
+  while (element && leadingHeadings.length < 2) {
+    leadingHeadings.push(element);
+    const combinedKey = normalizeHeadingText(
+      leadingHeadings.map(heading => heading.textContent || '').join(' ')
+    );
+    if (combinedKey === titleKey) {
+      return true;
+    }
+    element = findNextLeadingHeading(element, body);
+  }
+  return false;
+}
+
+function findLeadingHeading(container) {
+  let element = container.firstElementChild;
+  let depth = 0;
+  while (element && depth < 4) {
+    if (/^H[1-3]$/.test(element.tagName)) return element;
+    if (!/^(DIV|SECTION|HEADER)$/.test(element.tagName)) return null;
+    element = element.firstElementChild;
+    depth++;
+  }
+  return null;
+}
+
+function findNextLeadingHeading(heading, body) {
+  if (heading.nextElementSibling && /^H[1-3]$/.test(heading.nextElementSibling.tagName)) {
+    return heading.nextElementSibling;
+  }
+
+  let wrapper = heading.parentElement;
+  while (wrapper && wrapper !== body) {
+    const sibling = wrapper.nextElementSibling;
+    if (sibling) {
+      return /^H[1-3]$/.test(sibling.tagName) ? sibling : findLeadingHeading(sibling);
+    }
+    wrapper = wrapper.parentElement;
+  }
+  return null;
+}
+
+function normalizeHeadingText(value) {
+  return String(value || '')
+    .replace(/\s+/g, '')
+    .replace(/[—–－]/g, '-')
+    .replace(/[：:]/g, ':')
+    .trim();
+}
+
+async function prevChapter() {
+  if (currentBookId && currentChapterIndex > 1) {
+    await saveReadingProgress();
+    suppressReadingProgressTracking = true;
+    currentChapterIndex--;
+    await loadCurrentChapter();
+    scrollReaderToTop();
+    await saveReadingProgress(0);
+    releaseReadingProgressTracking();
+  }
+}
+
+async function nextChapter() {
   if (!currentBookId) return;
   const max = Math.max(...chaptersCache.map(c => c.chapterIndex));
-  if (currentChapterIndex < max) { currentChapterIndex++; loadCurrentChapter(); }
+  if (currentChapterIndex < max) {
+    await saveReadingProgress();
+    suppressReadingProgressTracking = true;
+    currentChapterIndex++;
+    await loadCurrentChapter();
+    scrollReaderToTop();
+    await saveReadingProgress(0);
+    releaseReadingProgressTracking();
+  }
 }
-function jumpChapter() {
+
+async function jumpChapter() {
   const v = parseInt(document.getElementById('chapterSelect').value, 10);
-  if (!isNaN(v)) { currentChapterIndex = v; loadCurrentChapter(); }
+  if (!isNaN(v)) {
+    await saveReadingProgress();
+    suppressReadingProgressTracking = true;
+    currentChapterIndex = v;
+    await loadCurrentChapter();
+    scrollReaderToTop();
+    await saveReadingProgress(0);
+    releaseReadingProgressTracking();
+  }
+}
+
+function updateChapterNavigationState() {
+  const indexes = chaptersCache.map(chapter => chapter.chapterIndex);
+  const min = indexes.length ? Math.min(...indexes) : currentChapterIndex;
+  const max = indexes.length ? Math.max(...indexes) : currentChapterIndex;
+  const atFirst = !currentBookId || currentChapterIndex <= min;
+  const atLast = !currentBookId || currentChapterIndex >= max;
+  ['topPrevChapterBtn', 'bottomPrevChapterBtn'].forEach(id => {
+    document.getElementById(id).disabled = atFirst;
+  });
+  ['topNextChapterBtn', 'bottomNextChapterBtn'].forEach(id => {
+    document.getElementById(id).disabled = atLast;
+  });
+}
+
+function scrollReaderToTop() {
+  document.querySelector('.reader-area').scrollIntoView({
+    behavior: 'smooth',
+    block: 'start'
+  });
+}
+
+function releaseReadingProgressTracking() {
+  window.setTimeout(() => {
+    suppressReadingProgressTracking = false;
+  }, 500);
+}
+
+function currentReadingOffset() {
+  const content = document.getElementById('chapterContent');
+  if (!content || !currentBookId) return 0;
+  const contentTop = content.getBoundingClientRect().top + window.scrollY;
+  const offset = Math.max(0, window.scrollY - contentTop);
+  return Math.min(Math.round(offset), Math.max(0, content.scrollHeight));
+}
+
+async function saveReadingProgress(forcedOffset) {
+  if (suppressReadingProgressTracking && forcedOffset == null) return;
+  if (!hasAuthUser() || !currentBookId || !currentChapterIndex) return;
+  const offset = forcedOffset == null ? currentReadingOffset() : forcedOffset;
+  try {
+    await api('POST', '/api/user/books/' + currentBookId + '/progress', {
+      chapterIndex: currentChapterIndex,
+      offset
+    });
+  } catch (e) {
+    console.warn('阅读进度保存失败', e);
+  }
+}
+
+function scheduleReadingProgressSave() {
+  if (suppressReadingProgressTracking || !hasAuthUser() || !currentBookId) return;
+  window.clearTimeout(readingProgressSaveTimer);
+  readingProgressSaveTimer = window.setTimeout(() => saveReadingProgress(), 800);
+}
+
+async function restoreReadingOffset(offset) {
+  const content = document.getElementById('chapterContent');
+  if (!content) return;
+  const images = Array.from(content.querySelectorAll('img'));
+  await Promise.race([
+    Promise.all(images.map(image => image.complete
+      ? Promise.resolve()
+      : new Promise(resolve => {
+          image.addEventListener('load', resolve, { once: true });
+          image.addEventListener('error', resolve, { once: true });
+        }))),
+    new Promise(resolve => window.setTimeout(resolve, 1000))
+  ]);
+  const contentTop = content.getBoundingClientRect().top + window.scrollY;
+  window.scrollTo({
+    top: contentTop + Math.max(0, Number(offset) || 0),
+    behavior: 'auto'
+  });
 }
 
 async function addCurrentBookToShelf() {
@@ -1938,6 +2251,7 @@ async function addCurrentBookToShelf() {
   if (!hasAuthUser()) { openLogin(); return; }
   try {
     await api('POST', '/api/user/bookshelf/' + currentBookId);
+    await saveReadingProgress(currentReadingOffset());
     await loadBookshelf();
     alert('已加入书架');
   } catch (e) { alert('加入失败'); }
@@ -2539,6 +2853,12 @@ document.getElementById('chapterContent').addEventListener('touchend', function(
   setTimeout(captureReadingSelection, 0);
 });
 document.getElementById('aiSelectionClear').addEventListener('click', clearSelectedReadingContext);
+window.addEventListener('scroll', scheduleReadingProgressSave, { passive: true });
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'hidden') {
+    saveReadingProgress();
+  }
+});
 
 restoreUser();
 restoreReaderStyle();

@@ -2,11 +2,19 @@ package com.example.httpreading.service;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.StandardCopyOption;
+import java.util.Comparator;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.HexFormat;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -17,6 +25,8 @@ import com.example.httpreading.api.ErrorCode;
 @Service
 public class DocumentStorageService {
 
+    private static final Set<String> IMAGE_EXTENSIONS = Set.of(
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg");
     private final Path storageRoot;
 
     public DocumentStorageService(@Value("${http-reading.storage.root:${user.home}/.http-reading}") String storageRoot) {
@@ -46,6 +56,45 @@ public class DocumentStorageService {
         return relativePath;
     }
 
+    public String sha256(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw ErrorCode.BAD_REQUEST.toException("上传文件不能为空");
+        }
+        try (InputStream input = file.getInputStream()) {
+            return digestSha256(input);
+        } catch (IOException e) {
+            throw ErrorCode.BAD_REQUEST.toException("无法读取上传文件");
+        }
+    }
+
+    public String sha256(String relativePath) {
+        Path path = resolveRelativePath(relativePath);
+        if (!Files.isRegularFile(path)) {
+            throw ErrorCode.RESOURCE_NOT_FOUND.toException("原始书籍文件不存在: " + relativePath);
+        }
+        try (InputStream input = Files.newInputStream(path)) {
+            return digestSha256(input);
+        } catch (IOException e) {
+            throw ErrorCode.INTERNAL_ERROR.toException("书籍文件哈希计算失败: " + relativePath);
+        }
+    }
+
+    private String digestSha256(InputStream input) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = input.read(buffer)) >= 0) {
+                if (read > 0) {
+                    digest.update(buffer, 0, read);
+                }
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 algorithm is unavailable", e);
+        }
+    }
+
     public String writeChapterText(Long bookId, Integer chapterIndex, String content) {
         String relativePath = "books/" + bookId + "/chapters/" + chapterIndex + ".txt";
         Path target = resolveRelativePath(relativePath);
@@ -58,6 +107,61 @@ public class DocumentStorageService {
         return relativePath;
     }
 
+    public String writeChapterHtml(Long bookId, Integer chapterIndex, String contentHtml) {
+        if (contentHtml == null || contentHtml.isBlank()) {
+            return null;
+        }
+        String relativePath = "books/" + bookId + "/chapters/" + chapterIndex + ".html";
+        Path target = resolveRelativePath(relativePath);
+        try {
+            Files.createDirectories(target.getParent());
+            Files.writeString(target, contentHtml, StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+        } catch (IOException e) {
+            ErrorCode.INTERNAL_ERROR.throwException("章节 HTML 文件保存失败: " + chapterIndex);
+        }
+        return relativePath;
+    }
+
+    public void replaceBookAssets(Long bookId, Map<String, byte[]> assets) {
+        Path bookRoot = resolveRelativePath("books/" + bookId);
+        Path target = bookRoot.resolve("assets").normalize();
+        Path staging = bookRoot.resolve("assets-staging-" + UUID.randomUUID()).normalize();
+        Path backup = bookRoot.resolve("assets-backup-" + UUID.randomUUID()).normalize();
+        try {
+            Files.createDirectories(staging);
+            for (Map.Entry<String, byte[]> asset : assets.entrySet()) {
+                Path relative = safeAssetRelativePath(asset.getKey());
+                Path output = staging.resolve(relative).normalize();
+                if (!output.startsWith(staging)) {
+                    throw new IOException("非法 EPUB 图片路径");
+                }
+                Files.createDirectories(output.getParent());
+                Files.write(output, asset.getValue(), StandardOpenOption.CREATE_NEW);
+            }
+            Files.createDirectories(bookRoot);
+            if (Files.exists(target)) {
+                moveDirectory(target, backup);
+            }
+            try {
+                moveDirectory(staging, target);
+            } catch (IOException moveError) {
+                if (Files.exists(backup) && !Files.exists(target)) {
+                    moveDirectory(backup, target);
+                }
+                throw moveError;
+            }
+            deleteTree(backup);
+        } catch (IOException e) {
+            try {
+                deleteTree(staging);
+            } catch (IOException ignored) {
+                // Preserve the original failure.
+            }
+            ErrorCode.INTERNAL_ERROR.throwException("EPUB 图片资源保存失败");
+        }
+    }
+
     public String readText(String relativePath) {
         Path path = resolveRelativePath(relativePath);
         if (!Files.exists(path)) {
@@ -68,6 +172,70 @@ public class DocumentStorageService {
         } catch (IOException e) {
             ErrorCode.INTERNAL_ERROR.throwException("章节文本文件读取失败: " + relativePath);
             return "";
+        }
+    }
+
+    public StoredAsset readBookAsset(Long bookId, String assetPath) {
+        Path relative = safeAssetRelativePath(assetPath);
+        Path assetRoot = resolveRelativePath("books/" + bookId + "/assets");
+        Path resolved = assetRoot.resolve(relative).normalize();
+        if (!resolved.startsWith(assetRoot)) {
+            ErrorCode.BAD_REQUEST.throwException("非法图片路径");
+        }
+        if (!Files.isRegularFile(resolved)) {
+            ErrorCode.RESOURCE_NOT_FOUND.throwException("图片资源不存在");
+        }
+        return new StoredAsset(resolved, imageMediaType(resolved.getFileName().toString()));
+    }
+
+    private Path safeAssetRelativePath(String assetPath) {
+        if (assetPath == null || assetPath.isBlank()) {
+            throw ErrorCode.BAD_REQUEST.toException("图片路径不能为空");
+        }
+        String normalizedSeparators = assetPath.replace('\\', '/');
+        Path relative;
+        try {
+            relative = Path.of(normalizedSeparators).normalize();
+        } catch (RuntimeException e) {
+            throw ErrorCode.BAD_REQUEST.toException("非法图片路径");
+        }
+        if (relative.isAbsolute() || relative.startsWith("..") || !hasImageExtension(relative.toString())) {
+            throw ErrorCode.BAD_REQUEST.toException("非法图片路径");
+        }
+        return relative;
+    }
+
+    private boolean hasImageExtension(String filename) {
+        String lower = filename.toLowerCase(Locale.ROOT);
+        return IMAGE_EXTENSIONS.stream().anyMatch(lower::endsWith);
+    }
+
+    private String imageMediaType(String filename) {
+        String lower = filename.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+        if (lower.endsWith(".gif")) return "image/gif";
+        if (lower.endsWith(".webp")) return "image/webp";
+        if (lower.endsWith(".svg")) return "image/svg+xml";
+        throw ErrorCode.BAD_REQUEST.toException("不支持的图片格式");
+    }
+
+    private void deleteTree(Path root) throws IOException {
+        if (root == null || !Files.exists(root)) {
+            return;
+        }
+        try (var paths = Files.walk(root)) {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) {
+                Files.deleteIfExists(path);
+            }
+        }
+    }
+
+    private void moveDirectory(Path source, Path target) throws IOException {
+        try {
+            Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+        } catch (java.nio.file.AtomicMoveNotSupportedException e) {
+            Files.move(source, target);
         }
     }
 
@@ -105,5 +273,8 @@ public class DocumentStorageService {
 
     public Path getStorageRoot() {
         return storageRoot;
+    }
+
+    public record StoredAsset(Path path, String mediaType) {
     }
 }

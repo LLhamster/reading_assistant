@@ -19,6 +19,8 @@ import org.springframework.web.multipart.MultipartFile;
 import com.example.httpreading.domain.entity.Books;
 import com.example.httpreading.domain.entity.Chapters;
 import com.example.httpreading.dto.BookCreateRequest;
+import com.example.httpreading.dto.BookImportIndexResponse;
+import com.example.httpreading.dto.BookImportResponse;
 import com.example.httpreading.repository.ChaptersRepository;
 import com.example.httpreading.service.BooksAdminService;
 import com.example.httpreading.service.BooksService;
@@ -58,7 +60,7 @@ public class AdminController {
 
     /** 上传并导入书籍文件 */
     @PostMapping(value = "/books/import", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public Books importBook(@RequestParam("file") MultipartFile file,
+    public BookImportResponse importBook(@RequestParam("file") MultipartFile file,
                             @RequestParam(value = "title", required = false) String title,
                             @RequestParam(value = "author", required = false) String author,
                             @RequestParam(value = "intro", required = false) String intro,
@@ -72,6 +74,13 @@ public class AdminController {
         req.setCoverUrl(coverUrl);
         log.info("管理员导入书籍文件 - filename:{}, title:{}", file.getOriginalFilename(), title);
         return booksAdminService.importBookFile(req, file);
+    }
+
+    /** 为历史导入书籍补齐内容哈希，并返回批量导入去重索引。 */
+    @PostMapping("/books/import-index/refresh")
+    public BookImportIndexResponse refreshBookImportIndex() {
+        log.info("刷新书籍导入哈希索引");
+        return booksAdminService.refreshImportIndex();
     }
 
     /** 重新解析已保存的原始书籍文件，不自动构建 RAG */

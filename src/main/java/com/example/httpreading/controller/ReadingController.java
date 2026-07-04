@@ -20,7 +20,6 @@ import com.example.httpreading.service.ReadingService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpSession;
 import jakarta.validation.constraints.Positive;
 
 @RestController
@@ -36,11 +35,11 @@ public class ReadingController {
     }
 
     private Long getUserId(HttpServletRequest request){
-        HttpSession session = request.getSession(false);
-        if(session == null || session.getAttribute("userId") == null)
-            throw new IllegalStateException("can not found userid");
-        //     return null;
-        return (Long)session.getAttribute("userId");
+        Object userId = request.getAttribute("userId");
+        if (userId == null) {
+            throw new IllegalArgumentException("未登录");
+        }
+        return (Long) userId;
     }
 
     @Operation(summary = "获取书籍的进度", description = "")
@@ -61,10 +60,6 @@ public class ReadingController {
         Integer index = body.get("chapterIndex");
         Integer offset = body.getOrDefault("offset", 0);
         Long userId = getUserId(request);
-        // if(userId == null){
-        //     System.out.println("未登录或会话失效");
-        //     return CommonResponse.error(401, "未登录或会话失效");
-        // }
         if(index == null || offset ==null) throw new IllegalArgumentException("记录进度时没有章节号");
         log.info("更新阅读进度 - userId:{}, bookId:{}, chapterIndex:{}, offset:{}", userId, bookId, index, offset);
         Reading reading = readingService.updateProgress(bookId, userId, index, offset);

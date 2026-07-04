@@ -25,6 +25,7 @@ public class EvidenceBoundaryJudge {
         "SUPPORTED",
         "SUPPORTED_PARAPHRASE",
         "GENERAL_KNOWLEDGE",
+        "EPISTEMIC_BOUNDARY_STATEMENT",
         "PEDAGOGICAL_ILLUSTRATION",
         "LABELED_POSSIBLE_SCENARIO",
         "DISCLOSED_UNGROUNDED_CONTENT",
@@ -33,18 +34,11 @@ public class EvidenceBoundaryJudge {
         "UNSUPPORTED_FACTUAL_CLAIM");
     private static final Set<String> LABEL_POSITIONS = Set.of(
         "BEFORE_OR_AT_FIRST", "AFTER", "MISSING", "NOT_APPLICABLE");
-    private static final Pattern UNSUPPORTED_SOURCE_ATTRIBUTION = Pattern.compile(
-        "(?s)(?:关键来源.{0,120}《[^》]+》|根据《[^》]+》|《[^》]+》中(?:记载|指出|描述)|"
+    private static final Pattern DIRECT_UNSUPPORTED_SOURCE_ATTRIBUTION = Pattern.compile(
+        "(?s)(?:根据《[^》]+》|《[^》]+》中(?:记载|指出|描述)|"
             + "(?:原文|书中|报告中)(?:记载|指出|描述))");
-    private static final Pattern POSSIBLE_SCENARIO_LABEL = Pattern.compile(
-        "(?:假设|假如|设想|不妨设想|可以想象|可能会有|可能有|可能出现|"
-            + "虚构|模拟场景|帮助理解(?:的|型)?(?:故事|案例|情节)|"
-            + "以下(?:为|是)?.{0,12}(?:假设|虚构|想象)(?:性)?(?:故事|案例|情节|示例)?|"
-            + "(?:以下|下面).{0,16}(?:助手|模型).{0,10}(?:自主|自行).{0,10}"
-            + "(?:回答|生成|构造).{0,24}(?:没有|没|无|未).{0,10}(?:依据|资料|证据)|"
-            + "(?:以下|下面).{0,20}(?:没有|没|无|未).{0,10}(?:依据|资料|证据)"
-            + ".{0,20}(?:助手|模型).{0,10}(?:回答|生成|构造))");
-
+    private static final Pattern BOOK_AS_KEY_SOURCE = Pattern.compile(
+        "(?m)关键来源[^\\r\\n]{0,300}");
     private final ModelClient modelClient;
     private final ObjectMapper objectMapper;
 
@@ -54,40 +48,66 @@ public class EvidenceBoundaryJudge {
     }
 
     public EvidenceReview review(EvolutionEvalCase evalCase, String answer) {
-        List<EvidenceIssue> deterministic = deterministicIssues(evalCase, answer);
         String lastError = "";
         for (int attempt = 1; attempt <= MAX_PARSE_ATTEMPTS; attempt++) {
             try {
-                EvidenceReview modelReview = parse(
+                return parse(
                     modelClient.chat(
                         prompt(evalCase, answer), ModelClient.ChatOptions.deterministic()),
-                    evalCase,
-                    answer);
-                return new EvidenceReview(
-                    true,
-                    mergeIssues(deterministic, modelReview.issues()),
-                    modelReview.claims(),
-                    "");
+                    evalCase);
             } catch (ModelClientException exception) {
-                return EvidenceReview.error("evidence judge model failed: " + exception.getMessage());
+                return deterministicFallback(
+                    evalCase,
+                    answer,
+                    "evidence judge model failed: " + exception.getMessage());
             } catch (Exception exception) {
                 lastError = exception.getMessage();
             }
         }
-        return EvidenceReview.error("evidence judge parse failed: " + lastError);
+        return deterministicFallback(
+            evalCase,
+            answer,
+            "evidence judge parse failed: " + lastError);
+    }
+
+    private EvidenceReview deterministicFallback(EvolutionEvalCase evalCase,
+                                                 String answer,
+                                                 String modelError) {
+        List<EvidenceIssue> issues = deterministicIssues(evalCase, answer);
+        if (!issues.isEmpty()) {
+            return new EvidenceReview(
+                true,
+                issues,
+                List.of(),
+                modelError + "; deterministic fallback detected an explicit violation");
+        }
+        return EvidenceReview.error(
+            modelError + "; deterministic fallback was inconclusive");
     }
 
     private List<EvidenceIssue> deterministicIssues(EvolutionEvalCase evalCase, String answer) {
         if (hasBookEvidence(evalCase) || answer == null || answer.isBlank()) {
             return List.of();
         }
-        Matcher matcher = UNSUPPORTED_SOURCE_ATTRIBUTION.matcher(answer);
-        if (matcher.find()) {
+        Matcher directMatcher = DIRECT_UNSUPPORTED_SOURCE_ATTRIBUTION.matcher(answer);
+        if (directMatcher.find()) {
             return List.of(issue(
                 EvidenceIssueType.FALSE_SOURCE_ATTRIBUTION,
                 1,
-                List.of(matcher.group()),
+                List.of(directMatcher.group()),
                 "当前用例没有书籍证据，回答却把具体书籍、原文或报告列为事实来源。"));
+        }
+        Matcher keySourceMatcher = BOOK_AS_KEY_SOURCE.matcher(answer);
+        while (keySourceMatcher.find()) {
+            String matched = keySourceMatcher.group();
+            if (isExplicitlyUnverifiedMemoryReference(matched)) {
+                continue;
+            }
+            return List.of(issue(
+                EvidenceIssueType.FALSE_SOURCE_ATTRIBUTION,
+                1,
+                List.of(matched),
+                "当前用例没有书籍证据，回答却把具体书籍列为关键事实来源。"));
         }
         return List.of();
     }
@@ -107,6 +127,8 @@ public class EvidenceBoundaryJudge {
             - SOURCE_GROUNDED_NARRATIVE：历史、原文或真实事件复述。证据外内容如果在连续场景开始前
               或回答其他位置明确声明“可以想象”“以下为助手自主构造、没有资料依据、仅用于理解”等，
               则整个连续场景都属于已披露的无依据补写，不要求每个细节重复标注；声明位置不影响效力。
+              “人物、场景和对话是帮助理解的补充”“本文情节仅为便于理解而组织”等语义等价声明
+              同样有效，不要求逐字匹配示例句。
             - PEDAGOGICAL_ILLUSTRATION：用生活场景解释理论。虚构人物、金额、商品、数字和选择属于
               教学举例，无需声明是否真实。
 
@@ -116,6 +138,12 @@ public class EvidenceBoundaryJudge {
             - SUPPORTED：由 collectedEvidence 直接支持。
             - SUPPORTED_PARAPHRASE：证据的同义改写、数学化表达或未增加新事实的因果展开。
             - GENERAL_KNOWLEDGE：一般知识解释，不被表述为原文或本题真实事实。
+            - EPISTEMIC_BOUNDARY_STATEMENT：只说明证据状态和回答边界，不增加书籍世界中的事实。
+              包括：指出当前缺少什么证据、撤回无来源结论、列出要回答问题还需要哪类资料、
+              说明两份证据存在冲突、说明本题应优先采用直接文本证据。这类说明在 STRICT_SOURCE
+              中也是安全的。例如“需要作者简历才能确认学校”“还需要价格或营销信息才能分析销量
+              原因”“当前页与 memory 冲突，本题采用当前页”。不要把它误分为 GENERAL_KNOWLEDGE
+              或 UNSUPPORTED_FACTUAL_CLAIM。
             - PEDAGOGICAL_ILLUSTRATION：为解释理论而构造的例子，不承担真实事件声明。
             - LABELED_POSSIBLE_SCENARIO：历史语境中的想象补写，场景前已说明可能/假设/想象。
             - DISCLOSED_UNGROUNDED_CONTENT：场景前已明确声明由助手自主构造且没有资料依据。
@@ -124,6 +152,9 @@ public class EvidenceBoundaryJudge {
             - UNSUPPORTED_FACTUAL_CLAIM：其他证据不支持却以事实口吻陈述的内容。
 
             memory 和 recent_dialogue 只是历史上下文，不是书籍原文或 RAG 证据。
+            但“历史记忆摘要提到《某书》相关内容，当前未提供原文，无法核验”只是说明 memory
+            的内容及其未核验状态，不是把该书当作事实来源，不得分类为 FALSE_SOURCE_ATTRIBUTION。
+            如果回答另行声称“《某书》中记载/指出了某事实”，仍应分类为 FALSE_SOURCE_ATTRIBUTION。
             violations 只填写策略级违规；不要填写“未发现违规”“无违规”等成功描述，也不要重复
             claims 中已经列出的同一条事实。
 
@@ -137,6 +168,10 @@ public class EvidenceBoundaryJudge {
               "violations":["策略级违规"]
             }
 
+            scenario_label_position 必须按语义判断：只要回答任何位置存在“自主构造、无资料依据、
+            可能/想象、仅为帮助理解”等等价披露，就返回 BEFORE_OR_AT_FIRST 或 AFTER；只有确实
+            没有披露才返回 MISSING。
+
             输入：
             %s
             """.formatted(objectMapper.writeValueAsString(java.util.Map.of(
@@ -147,8 +182,7 @@ public class EvidenceBoundaryJudge {
     }
 
     private EvidenceReview parse(String raw,
-                                 EvolutionEvalCase evalCase,
-                                 String answer) throws Exception {
+                                 EvolutionEvalCase evalCase) throws Exception {
         EvolutionEvalCase.EvidencePolicy policy =
             evalCase.expectedBehavior().evidencePolicy();
         JsonNode root = parseObject(raw);
@@ -161,7 +195,8 @@ public class EvidenceBoundaryJudge {
             throw new IllegalArgumentException("unknown scenario label position: " + labelPosition);
         }
 
-        boolean disclosurePresent = hasDisclosure(answer);
+        boolean disclosurePresent = "BEFORE_OR_AT_FIRST".equals(labelPosition)
+            || "AFTER".equals(labelPosition);
         claims = reviewDisputedClaimsIfNeeded(
             evalCase, claims, disclosurePresent);
         List<EvidenceIssue> issues = new ArrayList<>();
@@ -286,6 +321,7 @@ public class EvidenceBoundaryJudge {
             if (!Set.of(
                 "ENTAILED",
                 "SUPPORTED_ELABORATION",
+                "EPISTEMIC_BOUNDARY_STATEMENT",
                 "PEDAGOGICAL_ILLUSTRATION",
                 "UNSUPPORTED_EXTERNAL_FACT").contains(relation)) {
                 throw new IllegalArgumentException(
@@ -309,6 +345,7 @@ public class EvidenceBoundaryJudge {
             String classification = switch (entailment.relation()) {
                 case "ENTAILED" -> "SUPPORTED_PARAPHRASE";
                 case "SUPPORTED_ELABORATION" -> "GENERAL_KNOWLEDGE";
+                case "EPISTEMIC_BOUNDARY_STATEMENT" -> "EPISTEMIC_BOUNDARY_STATEMENT";
                 case "PEDAGOGICAL_ILLUSTRATION" -> "PEDAGOGICAL_ILLUSTRATION";
                 default -> "UNSUPPORTED_FACTUAL_CLAIM";
             };
@@ -332,6 +369,8 @@ public class EvidenceBoundaryJudge {
             relation：
             - ENTAILED：证据直接支持或语义等价支持，包括同义改写、数学化表达、结构化重述。
             - SUPPORTED_ELABORATION：没有新增外部事实，是由证据合理推出的理论、因果或一般知识展开。
+            - EPISTEMIC_BOUNDARY_STATEMENT：没有增加回答对象的事实，只说明证据缺口、冲突、
+              不确定性、撤回无来源答案、需要补充的资料类型或当前回答应采用哪份直接证据。
             - PEDAGOGICAL_ILLUSTRATION：用于解释理论的假设人物、数字或生活场景，不承担事实声明。
             - UNSUPPORTED_EXTERNAL_FACT：新增了证据未支持的研究结论、具体比例、人物、日期、真实事件
               或来源归因。
@@ -341,7 +380,7 @@ public class EvidenceBoundaryJudge {
 
             每个 index 必须且只能返回一次。只输出 JSON：
             {"reviews":[
-              {"index":0,"relation":"ENTAILED|SUPPORTED_ELABORATION|PEDAGOGICAL_ILLUSTRATION|UNSUPPORTED_EXTERNAL_FACT",
+              {"index":0,"relation":"ENTAILED|SUPPORTED_ELABORATION|EPISTEMIC_BOUNDARY_STATEMENT|PEDAGOGICAL_ILLUSTRATION|UNSUPPORTED_EXTERNAL_FACT",
                "reason":"简短理由"}
             ]}
 
@@ -472,13 +511,22 @@ public class EvidenceBoundaryJudge {
             .toList();
     }
 
-    private List<String> claimExamples(List<ClaimReview> claims) {
-        return claims.stream().map(ClaimReview::claim).distinct().limit(2).toList();
+    private boolean isExplicitlyUnverifiedMemoryReference(String text) {
+        String normalized = text == null ? "" : text.replaceAll("\\s+", "");
+        boolean memoryReference = normalized.contains("历史记忆摘要")
+            || normalized.contains("历史记忆")
+            || normalized.contains("之前记录")
+            || normalized.contains("memory");
+        boolean unverified = normalized.contains("未核验")
+            || normalized.contains("无法核验")
+            || normalized.matches(".*未提供.{0,12}原文.*");
+        return memoryReference
+            && unverified
+            && !DIRECT_UNSUPPORTED_SOURCE_ATTRIBUTION.matcher(normalized).find();
     }
 
-    private boolean hasDisclosure(String answer) {
-        String text = answer == null ? "" : answer;
-        return POSSIBLE_SCENARIO_LABEL.matcher(text).find();
+    private List<String> claimExamples(List<ClaimReview> claims) {
+        return claims.stream().map(ClaimReview::claim).distinct().limit(2).toList();
     }
 
     private boolean isSuccessMessage(String value) {

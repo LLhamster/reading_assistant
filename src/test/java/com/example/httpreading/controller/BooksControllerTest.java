@@ -6,9 +6,12 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import java.util.List;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -21,12 +24,16 @@ import com.example.httpreading.domain.entity.Books;
 import com.example.httpreading.domain.entity.Chapters;
 import com.example.httpreading.service.BooksService;
 import com.example.httpreading.service.ChaptersService;
+import com.example.httpreading.service.DocumentStorageService;
 import com.example.httpreading.security.JwtService;
 import org.springframework.boot.test.mock.mockito.MockBean;
 
 @WebMvcTest(BooksController.class)
 @AutoConfigureMockMvc(addFilters = false) // 禁用安全过滤器，简化测试
 class BooksControllerTest {
+
+    @TempDir
+    Path tempDir;
 
     @Autowired
     private MockMvc mockMvc;
@@ -39,6 +46,9 @@ class BooksControllerTest {
 
     @MockBean
     private ChaptersService chaptersService;
+
+    @MockBean
+    private DocumentStorageService documentStorageService;
 
     @Test
     @DisplayName("GET /api/books - 分页查询书籍列表")
@@ -166,6 +176,26 @@ class BooksControllerTest {
                 .andExpect(jsonPath("$.chapterIndex").value(1))
                 .andExpect(jsonPath("$.title").value("第一章"))
                 .andExpect(jsonPath("$.content").value("这是第一章的内容"));
+    }
+
+    @Test
+    @DisplayName("GET /api/books/{id}/assets - 返回图片及安全缓存头")
+    void getBookAsset_returnsImage() throws Exception {
+        Path image = tempDir.resolve("test.png");
+        byte[] bytes = new byte[] {
+            (byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
+        };
+        Files.write(image, bytes);
+        when(documentStorageService.readBookAsset(1L, "OPS/test.png"))
+            .thenReturn(new DocumentStorageService.StoredAsset(image, "image/png"));
+
+        mockMvc.perform(get("/api/books/1/assets").param("path", "OPS/test.png"))
+            .andExpect(status().isOk())
+            .andExpect(content().contentType("image/png"))
+            .andExpect(content().bytes(bytes))
+            .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+            .andExpect(header().string("Content-Security-Policy", "sandbox; default-src 'none'"))
+            .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("immutable")));
     }
 
     @Test

@@ -34,17 +34,35 @@ public class FinalAnswerService {
                          ChatPlan plan,
                          CollectedEvidence evidence,
                          PromptOverride promptOverride) {
+        return answer(
+            request, plan, evidence, promptOverride, ModelClient.ChatOptions.defaults());
+    }
+
+    public String answer(AiChatRequest request,
+                         ChatPlan plan,
+                         CollectedEvidence evidence,
+                         PromptOverride promptOverride,
+                         ModelClient.ChatOptions chatOptions) {
         PromptOverride override = promptOverride == null ? PromptOverride.none() : promptOverride;
+        ModelClient.ChatOptions options = chatOptions == null
+            ? ModelClient.ChatOptions.defaults()
+            : chatOptions;
         String prompt = buildPrompt(request, plan, evidence, override.finalAnswerPatch());
         logPrompt("FINAL_ANSWER", prompt);
-        String answer = modelClient.chat(prompt);
+        String answer = chat(prompt, options);
         String issue = qualityIssue(plan, evidence, answer);
         if (issue.isBlank()) {
             return answer;
         }
         String repairPrompt = repairPrompt(prompt, answer, issue, plan);
         logPrompt("REPAIR_ANSWER", repairPrompt);
-        return modelClient.chat(repairPrompt);
+        return chat(repairPrompt, options);
+    }
+
+    private String chat(String prompt, ModelClient.ChatOptions options) {
+        return options.temperature() == null
+            ? modelClient.chat(prompt)
+            : modelClient.chat(prompt, options);
     }
 
     private void logPrompt(String stage, String prompt) {

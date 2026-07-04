@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import java.util.List;
 
 import com.example.httpreading.dto.AiChatRequest;
+import com.example.httpreading.service.ModelClient;
 import com.example.httpreading.service.ai.ChatPlan;
 import com.example.httpreading.service.ai.CollectedEvidence;
 import com.example.httpreading.service.ai.FinalAnswerService;
@@ -23,7 +24,8 @@ class InProcessAgentEvaluatorTest {
         FinalAnswerService finalAnswerService = mock(FinalAnswerService.class);
         when(finalAnswerService.answer(
             any(AiChatRequest.class), any(ChatPlan.class),
-            any(CollectedEvidence.class), any(PromptOverride.class)))
+            any(CollectedEvidence.class), any(PromptOverride.class),
+            any(ModelClient.ChatOptions.class)))
             .thenReturn("最终回答");
         InProcessAgentEvaluator evaluator = new InProcessAgentEvaluator(finalAnswerService);
         EvolutionEvalCase evalCase = new EvalCaseGenerator()
@@ -39,18 +41,23 @@ class InProcessAgentEvaluatorTest {
             ArgumentCaptor.forClass(CollectedEvidence.class);
         ArgumentCaptor<PromptOverride> overrides =
             ArgumentCaptor.forClass(PromptOverride.class);
+        ArgumentCaptor<ModelClient.ChatOptions> options =
+            ArgumentCaptor.forClass(ModelClient.ChatOptions.class);
         verify(finalAnswerService, times(2)).answer(
-            requests.capture(), plans.capture(), evidence.capture(), overrides.capture());
+            requests.capture(), plans.capture(), evidence.capture(), overrides.capture(),
+            options.capture());
 
         assertEquals(requests.getAllValues().get(0).resolvedSessionId(),
             requests.getAllValues().get(1).resolvedSessionId());
         assertEquals(plans.getAllValues().get(0), plans.getAllValues().get(1));
         assertTrue(plans.getAllValues().get(0).answerGuidance()
-            .contains("evidenceUseMode=PEDAGOGICAL_ILLUSTRATION"));
+            .contains("evidenceUseMode=STRICT_SOURCE"));
         assertEquals(evidence.getAllValues().get(0), evidence.getAllValues().get(1));
         assertTrue(overrides.getAllValues().get(0).isEmpty());
         assertTrue(overrides.getAllValues().get(1).plannerPatch().isBlank());
         assertEquals("先给具体场景", overrides.getAllValues().get(1).finalAnswerPatch());
+        assertTrue(options.getAllValues().stream()
+            .allMatch(value -> Double.valueOf(0.0).equals(value.temperature())));
     }
 
     @Test
@@ -58,11 +65,12 @@ class InProcessAgentEvaluatorTest {
         FinalAnswerService finalAnswerService = mock(FinalAnswerService.class);
         when(finalAnswerService.answer(
             any(AiChatRequest.class), any(ChatPlan.class),
-            any(CollectedEvidence.class), any(PromptOverride.class)))
+            any(CollectedEvidence.class), any(PromptOverride.class),
+            any(ModelClient.ChatOptions.class)))
             .thenReturn("最终回答");
         InProcessAgentEvaluator evaluator = new InProcessAgentEvaluator(finalAnswerService);
         EvolutionEvalCase evalCase = new EvalCaseGenerator()
-            .generate(List.of(), "u1", 1L, 1, 6).stream()
+            .generate(List.of(), "u1", 1L, 1, 10).stream()
             .filter(value -> value.expectedBehavior().evidencePolicy().evidenceUseMode()
                 == EvidenceUseMode.SOURCE_GROUNDED_NARRATIVE)
             .findFirst().orElseThrow();
@@ -73,7 +81,8 @@ class InProcessAgentEvaluatorTest {
         ArgumentCaptor<ChatPlan> plans = ArgumentCaptor.forClass(ChatPlan.class);
         verify(finalAnswerService).answer(
             any(AiChatRequest.class), plans.capture(),
-            any(CollectedEvidence.class), any(PromptOverride.class));
+            any(CollectedEvidence.class), any(PromptOverride.class),
+            any(ModelClient.ChatOptions.class));
         assertTrue(plans.getValue().answerGuidance().contains("第一个非标题句必须是"));
         assertTrue(plans.getValue().answerGuidance()
             .contains("以下为助手自主构造、没有资料依据，仅用于理解"));

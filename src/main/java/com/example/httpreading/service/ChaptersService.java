@@ -35,6 +35,10 @@ public class ChaptersService {
         if(path != null && !path.isBlank()){
             chapter.setContent(documentStorageService.readText(path));
         }
+        String renderPath = chapter.getRenderContentFilePath();
+        if (renderPath != null && !renderPath.isBlank()) {
+            chapter.setContentHtml(documentStorageService.readText(renderPath));
+        }
         return chapter;
     }
 

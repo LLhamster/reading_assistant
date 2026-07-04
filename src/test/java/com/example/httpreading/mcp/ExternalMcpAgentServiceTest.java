@@ -99,6 +99,34 @@ class ExternalMcpAgentServiceTest {
         verify(clientService).allowedToolDescriptors("github");
     }
 
+    @Test
+    void selfLocalDialogueCallReceivesTrustedRequestIdentity() {
+        Map<String, Object> descriptor = Map.of(
+            "serverName", "self-local",
+            "toolName", "context_get_recent_dialogue",
+            "inputSchema", Map.of("type", "object", "required", List.of()));
+        when(clientService.allowedToolDescriptors("self-local")).thenReturn(List.of(descriptor));
+
+        ExternalMcpCall dialogueCall = call("context_get_recent_dialogue", Map.of());
+        dialogueCall.setServerName("self-local");
+        when(plannerService.decide(any(), anyString(), anyList(), anyList(), anyInt(), anyInt()))
+            .thenReturn(decision(dialogueCall, "读取最近对话"))
+            .thenReturn(new ExternalMcpAgentDecision("complete", "完成", "", null, ""));
+        when(clientService.isToolAllowed("self-local", "context_get_recent_dialogue")).thenReturn(true);
+        when(clientService.callTool(any())).thenReturn(
+            ExternalMcpCallResult.success("self-local", "context_get_recent_dialogue", "{}"));
+
+        AiChatRequest request = request();
+        request.setUserId("user-7");
+        request.setSessionId("session-9");
+        agentService.execute(request, "planning", "self-local");
+
+        ArgumentCaptor<ExternalMcpCall> calls = ArgumentCaptor.forClass(ExternalMcpCall.class);
+        verify(clientService).callTool(calls.capture());
+        assertEquals("user-7", calls.getValue().getArguments().get("userId"));
+        assertEquals("session-9", calls.getValue().getArguments().get("sessionId"));
+    }
+
 
     @Test
     void dynamicallyRecoversFromFailedReadBySearchingThenReadingResolvedRepository() {
