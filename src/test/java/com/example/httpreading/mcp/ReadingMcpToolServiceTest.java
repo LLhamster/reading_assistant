@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.lang.reflect.Constructor;
+import java.util.Arrays;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -24,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.annotation.Autowired;
 
 @ExtendWith(MockitoExtension.class)
 class ReadingMcpToolServiceTest {
@@ -31,6 +34,8 @@ class ReadingMcpToolServiceTest {
     private AgentMemoryService agentMemoryService;
     @Mock
     private RagService ragService;
+    @Mock
+    private WebSearchMcpService webSearchMcpService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private ReadingMcpToolService service;
@@ -43,6 +48,46 @@ class ReadingMcpToolServiceTest {
             new DefaultContextManager(),
             new ContextBuilder(),
             objectMapper);
+    }
+
+    @Test
+    void autowiredConstructorIncludesWebSearchService() {
+        List<Constructor<?>> autowiredConstructors = Arrays.stream(ReadingMcpToolService.class.getConstructors())
+            .filter(constructor -> constructor.isAnnotationPresent(Autowired.class))
+            .toList();
+
+        assertEquals(1, autowiredConstructors.size());
+        assertTrue(Arrays.asList(autowiredConstructors.get(0).getParameterTypes())
+            .contains(WebSearchMcpService.class));
+    }
+
+    @Test
+    void webSearchDelegatesToInjectedSearchService() throws Exception {
+        ReadingMcpToolService searchEnabledService = new ReadingMcpToolService(
+            agentMemoryService,
+            ragService,
+            new DefaultContextManager(),
+            new ContextBuilder(),
+            new com.example.httpreading.service.ReadingContextCompactionService(),
+            null,
+            webSearchMcpService,
+            objectMapper);
+        when(webSearchMcpService.search("今日新闻", 5, "zh-CN", "day"))
+            .thenReturn(Map.of("items", List.of(Map.of(
+                "title", "新闻标题",
+                "url", "https://example.com/news",
+                "snippet", "新闻摘要",
+                "source", "example.com"))));
+
+        Map<String, Object> response = json(searchEnabledService.webSearch(Map.of(
+            "query", "今日新闻",
+            "topK", 5,
+            "lang", "zh-CN",
+            "timeRange", "day")));
+
+        assertEquals(true, response.get("ok"));
+        assertFalse(((Map<?, ?>) response.get("data")).isEmpty());
+        verify(webSearchMcpService).search("今日新闻", 5, "zh-CN", "day");
     }
 
     @Test

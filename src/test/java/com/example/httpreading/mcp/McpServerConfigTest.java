@@ -29,12 +29,14 @@ class McpServerConfigTest {
         assertNotNull(transportProvider);
         assertEquals("mcpServlet", registration.getServletName());
         assertTrue(registration.getUrlMappings().contains("/mcp"));
-        assertEquals(10, server.listTools().size());
+        assertEquals(12, server.listTools().size());
         Map<String, Tool> tools = server.listTools().stream()
             .collect(java.util.stream.Collectors.toMap(Tool::name, tool -> tool));
         assertTrue(tools.containsKey("profile_list_categories"));
         assertTrue(tools.containsKey("profile_get_category_detail"));
         assertTrue(tools.containsKey("profile_search_relevant"));
+        assertTrue(tools.containsKey("web_search"));
+        assertTrue(tools.containsKey("web_fetch"));
         assertTrue(tools.get("profile_search_relevant").description().contains("knowledge mastery state"));
         assertTrue(tools.get("profile_search_relevant").description().contains("next-reading recommendation"));
         assertTrue(tools.get("profile_search_relevant").inputSchema().properties().containsKey("standaloneQuestion"));

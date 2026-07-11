@@ -25,6 +25,9 @@ public class RabbitMQConfig {
     public static final String EXCHANGE_NAME = "book.index.exchange";
     public static final String QUEUE_NAME = "book.index.queue";
     public static final String ROUTING_KEY = "book.index";
+    public static final String COGNITION_EXCHANGE_NAME = "cognition.learning.exchange";
+    public static final String COGNITION_QUEUE_NAME = "cognition.concept.resolve.queue";
+    public static final String COGNITION_ROUTING_KEY = "cognition.concept.resolve";
 
     /** 交换机 */
     @Bean
@@ -42,6 +45,24 @@ public class RabbitMQConfig {
     @Bean
     public Binding bookIndexBinding(Queue bookIndexQueue, DirectExchange bookIndexExchange) {
         return BindingBuilder.bind(bookIndexQueue).to(bookIndexExchange).with(ROUTING_KEY);
+    }
+
+    @Bean
+    public DirectExchange cognitionExchange() {
+        return new DirectExchange(COGNITION_EXCHANGE_NAME);
+    }
+
+    @Bean
+    public Queue cognitionConceptResolveQueue() {
+        return new Queue(COGNITION_QUEUE_NAME, true);
+    }
+
+    @Bean
+    public Binding cognitionConceptResolveBinding(Queue cognitionConceptResolveQueue,
+                                                  DirectExchange cognitionExchange) {
+        return BindingBuilder.bind(cognitionConceptResolveQueue)
+            .to(cognitionExchange)
+            .with(COGNITION_ROUTING_KEY);
     }
 
     /** JSON 序列化方式（发消息时自动把对象转 JSON） */

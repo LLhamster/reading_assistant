@@ -53,7 +53,7 @@ public class PlannerPromptBuilder {
             2. 从“可调用 MCP server 白名单”中选择 0 个或 1 个 server。
             3. 如果不需要工具，输出 NO_TOOL。
             4. 如果需要内部阅读能力，选择 mcp.server:self-local。
-            5. 如果需要 GitHub、网页、实时信息、代码仓库等外部能力，选择匹配的 mcp.server:*。
+            5. 如果需要 GitHub、网页、实时信息、代码仓库等外部能力，选择匹配的 mcp.server:*；通用网页/新闻/最新信息优先选择 mcp.server:web-search，GitHub/代码仓库优先选择 mcp.server:github。
             6. 决定最终回答阶段的 answerMode、evidenceStrictness 和 answerRequirement。
             
             工具选择硬规则：
@@ -70,7 +70,7 @@ public class PlannerPromptBuilder {
                - toolPlan=[]
                - maxSteps=0
             5. self-local 用于本项目内部阅读能力，包括当前页面、划词、最近对话、书籍 RAG、用户记忆、用户画像、知识状态、个性化解释、下一步阅读推荐和关联旧知识；memoryEnabled=false 时不要因记忆需求选择它，ragEnabled=false 时不要因书籍检索需求选择它。
-            6. 用户需要 GitHub、网页、外部搜索、实时信息、最新信息、代码仓库时，必须选择匹配的外部 MCP server；如果没有匹配 server，不要用 self-local 凑数。
+            6. 用户需要 GitHub、网页、外部搜索、实时信息、最新信息、事实核验、代码仓库时，必须选择匹配的外部 MCP server；如果没有匹配 server，不要用 self-local 凑数。
             7. 外部能力缺少匹配 server 时，answerMode=EXTERNAL_SEARCH_REQUIRED，evidenceStrictness=STRICT，并在 answerGuidance 中要求说明当前没有实际执行外部搜索。
             8. standaloneQuestion 要尽量把“这里/这个/它/这句话”等指代改写成独立问题。
             9. answerGuidance 要说明最终回答应如何处理证据、补充解释、案例、开头风格和重复内容。
@@ -88,7 +88,7 @@ public class PlannerPromptBuilder {
             6. READING_PLAN：制定阅读计划、学习计划。
             7. TOOL_ACTION：需要执行工具动作，包括保存计划、查询外部 MCP server、GitHub 搜索、代码仓库分析等。
             8. 如果问题本质是阅读理解，但需要 self-local 内部 RAG/context/memory 补充资料，taskType 仍按 READING_QA、MEMORY_QA 或 NOTE_QA 判断。
-            9. 如果问题需要 GitHub、网页、实时信息、代码仓库或外部搜索来补充资料，taskType=TOOL_ACTION，answerMode=EXTERNAL_SEARCH_REQUIRED。
+            9. 如果问题需要 GitHub、网页、新闻、实时信息、代码仓库、事实核验或外部搜索来补充资料，taskType=TOOL_ACTION，answerMode=EXTERNAL_SEARCH_REQUIRED。
             10. taskTypeReason 必须说明为什么选择该 taskType，尤其要说明“搜索补资料”属于内部阅读能力还是外部 MCP 能力。
             
             executionMode 只能是：
@@ -154,6 +154,12 @@ public class PlannerPromptBuilder {
             - minDetailLevel=HIGH
             9. 只有当用户明确要求出处、真实性核验、时间地点姓名必须准确，或者问题本身属于外部事实核验时，才使用 evidenceStrictness=STRICT。
             10. minDetailLevel 只能是 LOW、MEDIUM、HIGH；不要输出 NONE、UNKNOWN、空值或其他枚举。
+
+            外部搜索 server 选择规则：
+            1. mcp.server:web-search 只用于通用网页搜索、新闻、最新情况、外部资料补充和事实核验。
+            2. mcp.server:web-search 内部工具通常是 web_search 和 web_fetch；一级 Planner 不输出这些内部工具名。
+            3. 选择 web-search 时，answerGuidance 必须要求最终回答保留来源 URL 或来源标识，并且只把 web-search 工具结果说成搜索结果。
+            4. 本地书籍、当前页面、用户记忆、用户画像仍选择 mcp.server:self-local；不要因为用户说“查一下书里”而选择 web-search。
             
             输出 JSON schema：
             {

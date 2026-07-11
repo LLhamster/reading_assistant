@@ -76,7 +76,9 @@ class FinalAnswerServiceTest {
         assertTrue(prompt.contains("严格考据型真实案例"));
         assertTrue(prompt.contains("理解辅助型例子"));
         assertTrue(prompt.contains("不是当前资料直接提供的案例"));
-        assertTrue(prompt.contains("没有实际执行外部/GitHub/实时搜索"));
+        assertTrue(prompt.contains("没有实际执行外部/GitHub/网页/实时搜索"));
+        assertTrue(prompt.contains("有 externalMcpRefs 时，回答要保留来源 URL 或来源标识"));
+        assertTrue(prompt.contains("externalMcpRefs"));
         assertTrue(prompt.contains("不能说成“本次搜索结果”"));
         assertTrue(prompt.contains("当前未收集到足够证据；以上为一般知识辅助理解"));
     }
@@ -252,6 +254,32 @@ class FinalAnswerServiceTest {
         assertTrue(answer.contains("当前没有可用的 GitHub"));
         assertTrue(answer.contains("历史记忆"));
         verify(modelClient).chat(contains("不合格原因：\n问题需要外部搜索，但没有 externalMcpRefs"));
+        verify(modelClient, org.mockito.Mockito.atLeastOnce()).chat(contains("外部/GitHub/网页/实时搜索"));
+    }
+
+    @Test
+    void acceptsExternalSearchAnswerWhenExternalEvidenceAndUrlArePresent() {
+        ModelClient modelClient = mock(ModelClient.class);
+        FinalAnswerService service = new FinalAnswerService(modelClient);
+        when(modelClient.chat(org.mockito.ArgumentMatchers.anyString()))
+            .thenReturn("今天的 AI 新闻要点来自 Example 的报道：https://example.com/ai。关键来源：https://example.com/ai");
+
+        String answer = service.answer(request(), webSearchPlan(), externalSearchEvidence());
+
+        assertTrue(answer.contains("https://example.com/ai"));
+        verify(modelClient, times(1)).chat(org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void promptShowsFailedExternalSearchRefs() {
+        FinalAnswerService service = new FinalAnswerService(mock(ModelClient.class));
+
+        String prompt = service.buildPrompt(request(), webSearchPlan(), failedExternalSearchEvidence());
+
+        assertTrue(prompt.contains("externalMcpRefs"));
+        assertTrue(prompt.contains("FAIL web-search/web_search"));
+        assertTrue(prompt.contains("工具失败"));
+        assertTrue(prompt.contains("DuckDuckGo timeout"));
     }
 
     private AiChatRequest request() {
@@ -363,6 +391,26 @@ class FinalAnswerServiceTest {
             "必须说明当前没有可用 GitHub/外部搜索工具，不能声称已经实时搜索。");
     }
 
+    private ChatPlan webSearchPlan() {
+        return new ChatPlan(
+            "搜索一下今天的 AI 新闻",
+            "搜索一下今天的 AI 新闻",
+            "外部网页搜索",
+            PlannerTaskType.TOOL_ACTION,
+            SubIntent.NONE,
+            AnswerRequirement.normal(),
+            AnswerMode.EXTERNAL_SEARCH_REQUIRED,
+            EvidenceStrictness.STRICT,
+            false,
+            ToolExecutionMode.BOUNDED_REACT,
+            List.of("mcp.server:web-search"),
+            List.of(),
+            "搜索网页新闻",
+            5,
+            "获得足够外部网页证据后停止",
+            "严格依据 web-search MCP 工具结果回答，保留来源 URL 或来源标识。");
+    }
+
     private ChatPlan conceptExplanationPlan() {
         return new ChatPlan(
             "机会主义是什么意思？",
@@ -469,6 +517,33 @@ class FinalAnswerServiceTest {
             List.of(),
             List.of(),
             "已收集证据：\n【相关记忆】之前记录过 httpreading 项目。");
+    }
+
+    private CollectedEvidence externalSearchEvidence() {
+        return new CollectedEvidence(
+            List.of(new EvidenceItem(
+                "external:web-search/web_search:1",
+                "external_mcp",
+                "web-search/web_search",
+                "{\"title\":\"AI News\",\"url\":\"https://example.com/ai\",\"snippet\":\"AI news summary\",\"publishedAt\":\"2026-07-08\",\"source\":\"Example\"}",
+                70,
+                0.8d,
+                java.util.Map.of("serverName", "web-search", "toolName", "web_search"))),
+            List.of(),
+            List.of(),
+            List.of("OK web-search/web_search"),
+            List.of("MCP_ROUTE web-search: selected by Planner"),
+            "已收集证据：\n【证据1】web-search/web_search\ntype=external_mcp\n{\"title\":\"AI News\",\"url\":\"https://example.com/ai\",\"snippet\":\"AI news summary\",\"publishedAt\":\"2026-07-08\",\"source\":\"Example\"}");
+    }
+
+    private CollectedEvidence failedExternalSearchEvidence() {
+        return new CollectedEvidence(
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of("FAIL web-search/web_search: DuckDuckGo timeout"),
+            List.of("MCP_ROUTE web-search: selected by Planner"),
+            "");
     }
 
     private CollectedEvidence emptyEvidence() {

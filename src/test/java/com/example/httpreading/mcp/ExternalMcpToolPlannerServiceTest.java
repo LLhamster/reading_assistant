@@ -222,6 +222,28 @@ class ExternalMcpToolPlannerServiceTest {
         assertTrue(value.contains("minScore"));
     }
 
+    @Test
+    void shouldIncludeWebSearchGuidanceInPrompt() {
+        when(modelClient.chat(anyString())).thenReturn(
+            "{\"status\":\"complete\",\"assessment\":\"done\",\"reasoningSummary\":\"done\",\"call\":null}");
+
+        plannerService.decide(
+            request("搜索一下今天的 AI 新闻"),
+            "Planner selected web-search because current web information is required.",
+            webSearchTools(),
+            List.of(),
+            1,
+            5);
+
+        ArgumentCaptor<String> prompt = ArgumentCaptor.forClass(String.class);
+        verify(modelClient).chat(prompt.capture());
+        String value = prompt.getValue();
+        assertTrue(value.contains("web_search"));
+        assertTrue(value.contains("web_fetch"));
+        assertTrue(value.contains("优先用 web_search"));
+        assertTrue(value.contains("再调用 web_fetch"));
+    }
+
 
     @Test
     void shouldLimitOptionsToThree() {
@@ -302,6 +324,20 @@ class ExternalMcpToolPlannerServiceTest {
                 "properties", Map.of(
                     "standaloneQuestion", Map.of("type", "string"),
                     "minScore", Map.of("type", "number")))));
+    }
+
+    private List<Map<String, Object>> webSearchTools() {
+        return List.of(
+            Map.of(
+                "serverName", "web-search",
+                "toolName", "web_search",
+                "description", "Search public web pages and return title, url, snippet, publishedAt, source.",
+                "inputSchema", Map.of("type", "object", "required", List.of("query"))),
+            Map.of(
+                "serverName", "web-search",
+                "toolName", "web_fetch",
+                "description", "Fetch a web page URL and return title, url, summary or content, publishedAt, source.",
+                "inputSchema", Map.of("type", "object", "required", List.of("url"))));
     }
 
     private Map<String, Object> descriptor(String toolName, String description, List<String> required) {

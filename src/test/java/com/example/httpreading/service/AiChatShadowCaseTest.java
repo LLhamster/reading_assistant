@@ -26,6 +26,7 @@ import com.example.httpreading.mcp.ExternalMcpCallResult;
 import com.example.httpreading.mcp.ExternalMcpClientService;
 import com.example.httpreading.mcp.ExternalMcpServerRouterService;
 import com.example.httpreading.mcp.ExternalMcpToolPlannerService;
+import com.example.httpreading.mq.cognition.LearningEventPublisher;
 import com.example.httpreading.mcp.PendingMcpInteractionStore;
 import com.example.httpreading.service.ai.EvidenceAggregator;
 import com.example.httpreading.service.ai.FinalAnswerService;
@@ -86,7 +87,8 @@ class AiChatShadowCaseTest {
             orchestrator,
             new EvidenceAggregator(objectMapper),
             new FinalAnswerService(finalAnswerModelClient),
-            new MemoryWriter(agentMemoryService));
+            new MemoryWriter(agentMemoryService),
+            mock(LearningEventPublisher.class));
     }
 
     @Test

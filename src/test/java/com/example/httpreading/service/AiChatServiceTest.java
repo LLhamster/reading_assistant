@@ -16,6 +16,7 @@ import com.example.httpreading.evolution.EvolutionExecutionOptions;
 import com.example.httpreading.evolution.PromptOverride;
 import com.example.httpreading.mcp.ExternalMcpAgentService;
 import com.example.httpreading.mcp.ExternalMcpCallResult;
+import com.example.httpreading.mq.cognition.LearningEventPublisher;
 import com.example.httpreading.service.ai.ChatPlan;
 import com.example.httpreading.service.ai.CollectedEvidence;
 import com.example.httpreading.service.ai.EvidenceAggregator;
@@ -49,6 +50,8 @@ class AiChatServiceTest {
     private FinalAnswerService finalAnswerService;
     @Mock
     private MemoryWriter memoryWriter;
+    @Mock
+    private LearningEventPublisher learningEventPublisher;
 
     private AiChatService aiChatService;
 
@@ -62,7 +65,8 @@ class AiChatServiceTest {
             mcpToolOrchestrator,
             evidenceAggregator,
             finalAnswerService,
-            memoryWriter);
+            memoryWriter,
+            learningEventPublisher);
     }
 
     @Test
@@ -87,6 +91,7 @@ class AiChatServiceTest {
         assertEquals(List.of("PLAN_MODE MULTI_TOOL"), response.getExternalMcpPlanRefs());
         assertEquals("completed", response.getStatus());
         verify(memoryWriter).write(request, plan, evidence, "最终回答");
+        verify(learningEventPublisher).publishAfterAnswer(request, response.getContextId());
         verify(externalMcpAgentService).cancelPending(request);
     }
 
@@ -107,6 +112,7 @@ class AiChatServiceTest {
         assertEquals("实验回答", result.response().getAnswer());
         assertEquals(plan, result.plan());
         verify(memoryWriter, never()).write(any(), any(), any(), any());
+        verify(learningEventPublisher, never()).publishAfterAnswer(any(), any());
         verify(externalMcpAgentService, never()).cancelPending(any());
     }
 
@@ -133,6 +139,7 @@ class AiChatServiceTest {
         assertEquals("请选择仓库", response.getAnswer());
         verify(finalAnswerService, never()).answer(any(), any(), any());
         verify(memoryWriter, never()).write(any(), any(), any(), any());
+        verify(learningEventPublisher, never()).publishAfterAnswer(any(), any());
     }
 
     @Test
@@ -173,6 +180,7 @@ class AiChatServiceTest {
         assertEquals(List.of("当前阅读页面划词：章节"), response.getSources());
         assertEquals(List.of("[working] 用户偏好"), response.getMemoryRefs());
         verify(memoryWriter, never()).write(any(), any(), any(), any());
+        verify(learningEventPublisher, never()).publishAfterAnswer(any(), any());
     }
 
     private AiChatRequest request() {

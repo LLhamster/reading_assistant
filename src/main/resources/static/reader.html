@@ -858,13 +858,18 @@
       padding: 6px 10px;
     }
 
-    .reading-highlight {
+     .reading-highlight {
       --mark-color: #d3a800;
       --mark-bg: rgba(247, 211, 80, 0.42);
+      color: inherit;
       border-radius: 2px;
       padding: 0 1px;
       cursor: pointer;
       transition: filter 0.2s, box-shadow 0.2s;
+    }
+
+    :root[data-theme="dark"] .reading-highlight {
+      color: var(--text-primary);
     }
 
     .reading-highlight[data-color="green"] { --mark-color: #269766; --mark-bg: rgba(93, 190, 137, 0.36); }

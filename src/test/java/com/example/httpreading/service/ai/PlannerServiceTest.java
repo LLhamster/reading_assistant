@@ -232,7 +232,7 @@ class PlannerServiceTest {
         assertEquals(EvidenceStrictness.STRICT, plan.evidenceStrictness());
         assertTrue(plan.toolPlan().isEmpty());
         assertTrue(plan.allowedTools().isEmpty());
-        assertTrue(plan.answerGuidance().contains("没有可用的 GitHub/外部搜索工具"));
+        assertTrue(plan.answerGuidance().contains("没有可用的 GitHub/网页/外部搜索 MCP 工具"));
     }
 
     @Test
@@ -256,7 +256,54 @@ class PlannerServiceTest {
         assertEquals(AnswerMode.EXTERNAL_SEARCH_REQUIRED, plan.answerMode());
         assertTrue(plan.allowedTools().isEmpty());
         assertTrue(plan.toolPlan().isEmpty());
-        assertTrue(plan.answerGuidance().contains("没有可用的 GitHub/外部搜索工具"));
+        assertTrue(plan.answerGuidance().contains("没有可用的 GitHub/网页/外部搜索 MCP 工具"));
+    }
+
+    @Test
+    void webSearchWithWebSearchServerUsesBoundedReactServerPlan() {
+        when(externalMcpClientService.routableServers()).thenReturn(List.of(
+            selfLocalServer(),
+            Map.of(
+                "name", "web-search",
+                "description", "通用网页搜索、新闻、最新情况和事实核验",
+                "allowedTools", List.of("web_search", "web_fetch"))));
+        when(modelClient.chat(anyString())).thenReturn(planJson(
+            "TOOL_ACTION",
+            "NONE",
+            "搜索一下今天的 AI 新闻",
+            false,
+            "BOUNDED_REACT",
+            "[\"mcp.server:web-search\"]",
+            "[]",
+            5,
+            "EXTERNAL_SEARCH_REQUIRED"));
+        AiChatRequest request = request("搜索一下今天的 AI 新闻");
+        request.setEnableExternalMcp(true);
+
+        ChatPlan plan = plannerService.plan(request);
+
+        assertEquals(ToolExecutionMode.BOUNDED_REACT, plan.executionMode());
+        assertEquals(List.of("mcp.server:web-search"), plan.allowedTools());
+        assertTrue(plan.toolPlan().isEmpty());
+        assertEquals(AnswerMode.EXTERNAL_SEARCH_REQUIRED, plan.answerMode());
+    }
+
+    @Test
+    void webSearchWithOnlyGithubServerUsesUnsupportedExternalPlan() {
+        when(externalMcpClientService.routableServers()).thenReturn(List.of(Map.of(
+            "name", "github",
+            "description", "GitHub 仓库资料",
+            "allowedTools", List.of("search_repositories"))));
+        when(modelClient.chat(anyString())).thenReturn("不是 JSON");
+        AiChatRequest request = request("搜索一下今天的 AI 新闻");
+        request.setEnableExternalMcp(true);
+
+        ChatPlan plan = plannerService.plan(request);
+
+        assertEquals(ToolExecutionMode.NO_TOOL, plan.executionMode());
+        assertEquals(AnswerMode.EXTERNAL_SEARCH_REQUIRED, plan.answerMode());
+        assertTrue(plan.allowedTools().isEmpty());
+        assertTrue(plan.answerGuidance().contains("没有可用的 GitHub/网页/外部搜索 MCP 工具"));
     }
 
     @Test

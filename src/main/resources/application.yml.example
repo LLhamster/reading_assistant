@@ -71,6 +71,21 @@ mcp:
           - list_branches
           - list_commits
           - get_commit
+      - name: web-search
+        description: "通用网页搜索 MCP 服务，用于网页资料、实时信息、新闻、最新情况、外部知识补充和事实核验；只返回外部搜索或网页抓取证据，不用于本地书籍 RAG、用户记忆或用户画像。工具结果应包含 title、url、snippet、publishedAt、source，以及 summary 或 content。"
+        url: ${WEB_SEARCH_MCP_URL:http://localhost:8080/mcp}
+        enabled: ${WEB_SEARCH_MCP_ENABLED:true}
+        timeoutSeconds: 20
+        headers:
+          Authorization: Bearer ${WEB_SEARCH_MCP_TOKEN:}
+        allowedTools:
+          - web_search
+          - web_fetch
+
+web-search:
+  duckduckgo:
+    endpoint: ${WEB_SEARCH_DUCKDUCKGO_ENDPOINT:https://duckduckgo.com/html/}
+  timeout-seconds: ${WEB_SEARCH_TIMEOUT_SECONDS:10}
 
 vector-db:
   type: Qdrant

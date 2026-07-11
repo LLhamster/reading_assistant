@@ -8,6 +8,7 @@ import com.example.httpreading.dto.AiChatRequest;
 import com.example.httpreading.dto.AiChatResponse;
 import com.example.httpreading.evolution.EvolutionExecutionOptions;
 import com.example.httpreading.mcp.ExternalMcpAgentService;
+import com.example.httpreading.mq.cognition.LearningEventPublisher;
 import com.example.httpreading.service.RagService.RagAnswer;
 import com.example.httpreading.service.ai.ChatPlan;
 import com.example.httpreading.service.ai.AiChatExecutionResult;
@@ -34,6 +35,7 @@ public class AiChatService {
     private final EvidenceAggregator evidenceAggregator;
     private final FinalAnswerService finalAnswerService;
     private final MemoryWriter memoryWriter;
+    private final LearningEventPublisher learningEventPublisher;
 
     public AiChatService(RagService ragService,
                          ContextManager contextManager,
@@ -42,7 +44,8 @@ public class AiChatService {
                          McpToolOrchestrator mcpToolOrchestrator,
                          EvidenceAggregator evidenceAggregator,
                          FinalAnswerService finalAnswerService,
-                         MemoryWriter memoryWriter) {
+                         MemoryWriter memoryWriter,
+                         LearningEventPublisher learningEventPublisher) {
         this.ragService = ragService;
         this.contextManager = contextManager;
         this.externalMcpAgentService = externalMcpAgentService;
@@ -51,6 +54,7 @@ public class AiChatService {
         this.evidenceAggregator = evidenceAggregator;
         this.finalAnswerService = finalAnswerService;
         this.memoryWriter = memoryWriter;
+        this.learningEventPublisher = learningEventPublisher;
     }
 
     public AiChatResponse chat(AiChatRequest request) {
@@ -137,6 +141,9 @@ public class AiChatService {
         }
         if (!options.disableMemoryWrite()) {
             memoryWriter.write(request, plan, evidence, answer);
+        }
+        if (!options.evalMode()) {
+            learningEventPublisher.publishAfterAnswer(request, contextId);
         }
 
         AiChatResponse response = new AiChatResponse(answer, evidence.sources());

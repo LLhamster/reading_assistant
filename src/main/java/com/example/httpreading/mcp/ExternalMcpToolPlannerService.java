@@ -61,6 +61,7 @@ public class ExternalMcpToolPlannerService {
             - 如果工具失败、参数不完整或目标名称可能不准确，请分析 observation，并从 allowedTools 中自主选择可能有效的下一步；不要依赖固定工具顺序。
             - 工具结果成功不代表用户目标一定完成；只有已经取得回答目标所需的信息时才返回 complete。
             - 每轮最多选择一个工具。只能调用 allowedTools 中的只读工具，并严格按照 inputSchema 生成参数。
+            - 对通用网页搜索：优先用 web_search 获取候选结果；如果搜索摘要、URL、发布时间和来源足以回答，就返回 complete；如果摘要不足或需要核验具体网页内容，再调用 web_fetch 读取 URL。
             - 当多个候选都合理、无法可靠确定用户指的是哪一个时，返回 needs_confirmation，并在 options 中提供最多 3 个候选。
             - 如果仍有可行的只读探索方法，不要过早返回 failed。
             - 不要重复 observations 中已经执行过的相同工具和相同参数。

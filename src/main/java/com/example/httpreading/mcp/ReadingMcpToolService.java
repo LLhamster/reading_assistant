@@ -31,6 +31,7 @@ public class ReadingMcpToolService {
     private final ContextBuilder contextBuilder;
     private final ReadingContextCompactionService readingContextCompactionService;
     private final UserProfileMcpService userProfileMcpService;
+    private final WebSearchMcpService webSearchMcpService;
     private final ObjectMapper objectMapper;
 
     @Autowired
@@ -40,6 +41,7 @@ public class ReadingMcpToolService {
                                  ContextBuilder contextBuilder,
                                  ReadingContextCompactionService readingContextCompactionService,
                                  UserProfileMcpService userProfileMcpService,
+                                 WebSearchMcpService webSearchMcpService,
                                  ObjectMapper objectMapper) {
         this.agentMemoryService = agentMemoryService;
         this.ragService = ragService;
@@ -47,7 +49,19 @@ public class ReadingMcpToolService {
         this.contextBuilder = contextBuilder;
         this.readingContextCompactionService = readingContextCompactionService;
         this.userProfileMcpService = userProfileMcpService;
+        this.webSearchMcpService = webSearchMcpService;
         this.objectMapper = objectMapper;
+    }
+
+    public ReadingMcpToolService(AgentMemoryService agentMemoryService,
+                                 RagService ragService,
+                                 ContextManager contextManager,
+                                 ContextBuilder contextBuilder,
+                                 ReadingContextCompactionService readingContextCompactionService,
+                                 UserProfileMcpService userProfileMcpService,
+                                 ObjectMapper objectMapper) {
+        this(agentMemoryService, ragService, contextManager, contextBuilder,
+            readingContextCompactionService, userProfileMcpService, null, objectMapper);
     }
 
     public ReadingMcpToolService(AgentMemoryService agentMemoryService,
@@ -56,7 +70,7 @@ public class ReadingMcpToolService {
                                  ContextBuilder contextBuilder,
                                  ObjectMapper objectMapper) {
         this(agentMemoryService, ragService, contextManager, contextBuilder,
-            new ReadingContextCompactionService(), null, objectMapper);
+            new ReadingContextCompactionService(), null, null, objectMapper);
     }
 
     public String memorySearch(Map<String, Object> args) {
@@ -250,6 +264,40 @@ public class ReadingMcpToolService {
         data.put("hasSelection", !readString(args, "selectedText").isBlank()
             || !readString(args, "selectedContext").isBlank());
         return success(data, content.isBlank() ? "未提供当前页面上下文" : "ok");
+    }
+
+    public String webSearch(Map<String, Object> args) {
+        if (webSearchMcpService == null) {
+            return error("web search service unavailable");
+        }
+        String query = readFirstString(args, "query", "question");
+        if (query.isBlank()) {
+            return error("query 不能为空");
+        }
+        try {
+            return success(webSearchMcpService.search(
+                query,
+                positiveInt(args, "topK", DEFAULT_LIMIT),
+                readString(args, "lang"),
+                readString(args, "timeRange")));
+        } catch (Exception exception) {
+            return error(exception.getMessage());
+        }
+    }
+
+    public String webFetch(Map<String, Object> args) {
+        if (webSearchMcpService == null) {
+            return error("web search service unavailable");
+        }
+        String url = readString(args, "url");
+        if (url.isBlank()) {
+            return error("url 不能为空");
+        }
+        try {
+            return success(webSearchMcpService.fetch(url));
+        } catch (Exception exception) {
+            return error(exception.getMessage());
+        }
     }
 
     private ContextPacket toContextPacket(Object item) {

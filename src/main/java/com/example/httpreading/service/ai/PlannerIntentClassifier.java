@@ -9,7 +9,8 @@ final class PlannerIntentClassifier {
         return containsAny(text,
             "github", "git hub", "仓库", "repo", "repository", "搜索项目", "搜索代码", "代码搜索",
             "网页搜索", "外部搜索", "联网搜索", "实时搜索", "网上搜", "上网搜", "查一下最新", "最新情况",
-            "当前最新", "官网", "网址", "网页", "commit", "readme");
+            "当前最新", "官网", "网址", "网页", "搜索一下", "搜一下", "新闻", "事实核验",
+            "核验", "查证", "外部资料", "网页资料", "网上资料", "commit", "readme");
     }
 
     static boolean requiresRealtimeExternalFact(String question) {

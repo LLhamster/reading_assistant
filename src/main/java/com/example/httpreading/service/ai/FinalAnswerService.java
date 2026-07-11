@@ -102,7 +102,8 @@ public class FinalAnswerService {
             二、answerMode
             - TEXT_ONLY：只能基于 collectedEvidence。资料没有就说明没有，不补充资料外事实。
             - CONTEXT_ANCHORED_MODEL_KNOWLEDGE：以 collectedEvidence 为锚点，可以用公共知识补充解释、背景、类比或帮助理解型例子；资料没有直接解释时先说明“当前资料没有直接解释”，再给一般知识辅助理解，并明确这不是原文直接证据。
-            - EXTERNAL_SEARCH_REQUIRED：必须依据 externalMcpRefs。没有 externalMcpRefs 时，说明当前没有实际执行外部/GitHub/实时搜索，不能声称搜索过。
+            - EXTERNAL_SEARCH_REQUIRED：必须依据 externalMcpRefs 和 collectedEvidence 中的 external_mcp 证据。没有 externalMcpRefs 时，说明当前没有实际执行外部/GitHub/网页/实时搜索，不能声称搜索过；有 externalMcpRefs 时，回答要保留来源 URL 或来源标识。
+            - 如果 externalMcpRefs 只有 FAIL 结果、collectedEvidence 没有 external_mcp 证据，说明外部搜索已经尝试但工具失败，并简要说明失败来源；不能说成“没有 externalMcpRefs”。
 
             三、evidenceStrictness
             - STRICT：严格依据证据，不能扩展事实细节。
@@ -112,7 +113,7 @@ public class FinalAnswerService {
             四、固定输出契约
             - 只输出面向用户的最终回答，不输出规划、工具调用或内部检查过程。
             - 回答必须围绕 originalQuestion，并遵守下面的运行时输入和证据边界。
-            - 最后列出关键来源；没有证据时写“关键来源：当前未收集到足够证据；以上为一般知识辅助理解”。
+            - 最后列出关键来源；外部搜索回答优先列 URL 或来源标识；没有证据时写“关键来源：当前未收集到足够证据；以上为一般知识辅助理解”。
 
             五、answerRequirement
             - allowModelKnowledge=true：允许公共知识补充，但不能伪装成原文证据。
@@ -137,6 +138,12 @@ public class FinalAnswerService {
             answerRequirement：%s
             answerGuidance：%s
 
+            externalMcpPlanRefs：
+            %s
+
+            externalMcpRefs：
+            %s
+
             collectedEvidence：
             %s
             """.formatted(
@@ -149,6 +156,8 @@ public class FinalAnswerService {
             plan == null ? EvidenceStrictness.STRICT : plan.evidenceStrictness(),
             plan == null ? AnswerRequirement.normal() : plan.answerRequirement(),
             guidance,
+            refsText(evidence == null ? null : evidence.externalMcpPlanRefs()),
+            refsText(evidence == null ? null : evidence.externalMcpRefs()),
             evidenceText);
         return new EvolvablePromptTemplate(
             fixedContract, DEFAULT_EVOLVABLE_POLICY).render(candidatePatch);
@@ -238,7 +247,7 @@ public class FinalAnswerService {
             必须修正的具体点：
             - 针对上面的“不合格原因”重写，不要只做同义改写。
             - 继续遵守原始生成提示中的 answerMode、evidenceStrictness、answerRequirement 和证据边界。
-            - TEXT_ONLY 不能补充资料外事实；EXTERNAL_SEARCH_REQUIRED 且没有 externalMcpRefs 时必须说明没有实际执行外部/GitHub/实时搜索。
+            - TEXT_ONLY 不能补充资料外事实；EXTERNAL_SEARCH_REQUIRED 且没有 externalMcpRefs 时必须说明没有实际执行外部/GitHub/网页/实时搜索；有 externalMcpRefs 时必须基于 external_mcp 证据并保留来源 URL 或来源标识。
             - 公共知识、帮助理解型例子、类比和推理补充必须标明是“补充理解”，不能伪装成原文证据或工具结果。
             - 严格考据型真实案例必须有 collectedEvidence 或 externalMcpRefs 支持；证据不足时说明缺少姓名、地点、日期、出处或外部核验。
             - 如果要求例子、故事或过程，要给出具体例子、起点、发展、转折、结果，并说明它如何对应原文观点。
@@ -264,7 +273,14 @@ public class FinalAnswerService {
         String text = normalize(answer);
         boolean hasExternalEvidence = evidence != null && !evidence.externalMcpRefs().isEmpty();
         if (!hasExternalEvidence && !text.matches(".*(没有|无法|不能|未实际|未执行|不可用|没有可用).*?(github|外部|实时|网页|搜索|工具).*")) {
-            return "问题需要外部搜索，但没有 externalMcpRefs，回答必须明确说明当前没有实际执行外部/GitHub/实时搜索。";
+            return "问题需要外部搜索，但没有 externalMcpRefs，回答必须明确说明当前没有实际执行外部/GitHub/网页/实时搜索。";
+        }
+        boolean hasOnlyFailedExternalRefs = evidence != null
+            && !evidence.externalMcpRefs().isEmpty()
+            && evidence.externalMcpRefs().stream().noneMatch(ref -> ref.startsWith("OK "))
+            && evidence.items().stream().noneMatch(item -> "external_mcp".equals(item.type()));
+        if (hasOnlyFailedExternalRefs && text.contains("没有 externalMcpRefs")) {
+            return "外部 MCP 工具已经尝试调用但失败，回答不能说没有 externalMcpRefs，应说明搜索工具失败。";
         }
         boolean hasOnlyMemory = evidence != null && !evidence.memoryRefs().isEmpty() && evidence.externalMcpRefs().isEmpty();
         if (hasOnlyMemory && text.matches(".*(本次搜索|搜索结果|github搜索结果|实时结果|刚搜索到).*")) {
@@ -687,5 +703,14 @@ public class FinalAnswerService {
 
     private String normalize(String value) {
         return value == null ? "" : value.replaceAll("\\s+", " ").trim();
+    }
+
+    private String refsText(java.util.List<String> refs) {
+        if (refs == null || refs.isEmpty()) {
+            return "[]";
+        }
+        return refs.stream()
+            .map(ref -> "- " + ref)
+            .collect(java.util.stream.Collectors.joining("\n"));
     }
 }

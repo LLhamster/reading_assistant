@@ -191,6 +191,82 @@ class ExternalMcpAgentServiceTest {
     }
 
     @Test
+    void webSearchCompletesWhenSearchResultIsEnough() {
+        when(clientService.allowedToolDescriptors("web-search")).thenReturn(List.of(
+            descriptor("web-search", "web_search", List.of("query"))));
+        ExternalMcpCall search = webCall("web_search", Map.of("query", "today AI news", "topK", 3));
+        when(plannerService.decide(any(), anyString(), anyList(), anyList(), anyInt(), anyInt()))
+            .thenReturn(decision(search, "搜索网页新闻"))
+            .thenReturn(new ExternalMcpAgentDecision("complete", "搜索结果足够回答", "", null, ""));
+        when(clientService.isToolAllowed("web-search", "web_search")).thenReturn(true);
+        when(clientService.callTool(any())).thenReturn(ExternalMcpCallResult.success(
+            "web-search",
+            "web_search",
+            """
+                {"data":[{"title":"AI News","url":"https://example.com/ai","snippet":"AI news summary","publishedAt":"2026-07-08","source":"Example"}]}
+                """));
+
+        ExternalMcpAgentResult result = agentService.execute(request("搜索一下今天的 AI 新闻"), "planning", "web-search");
+
+        assertEquals("completed", result.getStatus());
+        assertEquals(1, result.getResults().size());
+        assertTrue(result.getRefs().stream().anyMatch(ref -> ref.contains("web_search")));
+        assertTrue(result.getRefs().stream().anyMatch(ref -> ref.startsWith("AUTO_COMPLETE")));
+    }
+
+    @Test
+    void webSearchCanFetchResultUrlWhenSnippetIsInsufficient() {
+        when(clientService.allowedToolDescriptors("web-search")).thenReturn(List.of(
+            descriptor("web-search", "web_search", List.of("query")),
+            descriptor("web-search", "web_fetch", List.of("url"))));
+        ExternalMcpCall search = webCall("web_search", Map.of("query", "today AI news", "topK", 3));
+        ExternalMcpCall fetch = webCall("web_fetch", Map.of("url", "https://example.com/ai"));
+        when(plannerService.decide(any(), anyString(), anyList(), anyList(), anyInt(), anyInt()))
+            .thenReturn(decision(search, "先搜索网页"))
+            .thenReturn(decision(fetch, "摘要不足，抓取原文"))
+            .thenReturn(new ExternalMcpAgentDecision("complete", "网页正文足够回答", "", null, ""));
+        when(clientService.isToolAllowed(anyString(), anyString())).thenReturn(true);
+        when(clientService.callTool(any()))
+            .thenReturn(ExternalMcpCallResult.success(
+                "web-search",
+                "web_search",
+                "{\"data\":[{\"title\":\"AI News\",\"url\":\"https://example.com/ai\",\"snippet\":\"brief\"}]}"))
+            .thenReturn(ExternalMcpCallResult.success(
+                "web-search",
+                "web_fetch",
+                "{\"title\":\"AI News\",\"url\":\"https://example.com/ai\",\"content\":\"full article summary\",\"publishedAt\":\"2026-07-08\",\"source\":\"Example\"}"));
+
+        ExternalMcpAgentResult result = agentService.execute(request("搜索一下今天的 AI 新闻"), "planning", "web-search");
+
+        assertEquals("completed", result.getStatus());
+        assertEquals(2, result.getResults().size());
+        ArgumentCaptor<ExternalMcpCall> calls = ArgumentCaptor.forClass(ExternalMcpCall.class);
+        verify(clientService, org.mockito.Mockito.times(2)).callTool(calls.capture());
+        assertEquals("web_search", calls.getAllValues().get(0).getToolName());
+        assertEquals("web_fetch", calls.getAllValues().get(1).getToolName());
+        assertEquals("https://example.com/ai", calls.getAllValues().get(1).getArguments().get("url"));
+    }
+
+    @Test
+    void duplicateWebSearchCallIsBlockedWithoutExecutingTwice() {
+        when(clientService.allowedToolDescriptors("web-search")).thenReturn(List.of(
+            descriptor("web-search", "web_search", List.of("query"))));
+        ExternalMcpCall search = webCall("web_search", Map.of("query", "today AI news"));
+        when(plannerService.decide(any(), anyString(), anyList(), anyList(), anyInt(), anyInt()))
+            .thenReturn(decision(search, "搜索网页"))
+            .thenReturn(decision(search, "重复搜索"))
+            .thenReturn(new ExternalMcpAgentDecision("failed", "没有其他方法", "", null, "stop"));
+        when(clientService.isToolAllowed("web-search", "web_search")).thenReturn(true);
+        when(clientService.callTool(any())).thenReturn(
+            ExternalMcpCallResult.success("web-search", "web_search", "[]"));
+
+        ExternalMcpAgentResult result = agentService.execute(request("搜索一下今天的 AI 新闻"), "planning", "web-search");
+
+        verify(clientService, org.mockito.Mockito.times(1)).callTool(any());
+        assertTrue(result.getRefs().stream().anyMatch(ref -> ref.contains("duplicate call blocked")));
+    }
+
+    @Test
     void repositoryTargetThatReturnedNotFoundCannotBeRetriedWithDifferentPagination() {
         ExternalMcpCall first = call("list_commits",
             Map.of("owner", "httpread", "repo", "httpread", "perPage", 100));
@@ -400,9 +476,23 @@ class ExternalMcpAgentServiceTest {
         return request;
     }
 
+    private AiChatRequest request(String question) {
+        AiChatRequest request = request();
+        request.setQuestion(question);
+        return request;
+    }
+
     private ExternalMcpCall call(String toolName, Map<String, Object> arguments) {
         ExternalMcpCall call = new ExternalMcpCall();
         call.setServerName("github");
+        call.setToolName(toolName);
+        call.setArguments(arguments);
+        return call;
+    }
+
+    private ExternalMcpCall webCall(String toolName, Map<String, Object> arguments) {
+        ExternalMcpCall call = new ExternalMcpCall();
+        call.setServerName("web-search");
         call.setToolName(toolName);
         call.setArguments(arguments);
         return call;
@@ -423,8 +513,12 @@ class ExternalMcpAgentServiceTest {
     }
 
     private Map<String, Object> descriptor(String toolName, List<String> required) {
+        return descriptor("github", toolName, required);
+    }
+
+    private Map<String, Object> descriptor(String serverName, String toolName, List<String> required) {
         return Map.of(
-            "serverName", "github",
+            "serverName", serverName,
             "toolName", toolName,
             "inputSchema", Map.of("type", "object", "required", required));
     }

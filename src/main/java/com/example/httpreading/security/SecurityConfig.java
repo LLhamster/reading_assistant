@@ -47,6 +47,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/translate/**").permitAll()
                         .requestMatchers("/api/search/**").permitAll()
                         .requestMatchers("/api/ai/**").permitAll()
+                        .requestMatchers("/api/cognition/**").permitAll()
                         .requestMatchers("/mcp", "/mcp/**").permitAll()
                         // 页面和静态资源
                         .requestMatchers(HttpMethod.GET, "/", "/reader.html", "/static/**").permitAll()

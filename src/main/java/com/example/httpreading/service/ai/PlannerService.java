@@ -132,7 +132,7 @@ public class PlannerService {
         return new ChatPlan(
             question,
             question,
-            "用户请求 GitHub、网页、外部搜索或实时查询，但当前 ToolRegistry 没有对应可用工具，不能用 RAG 或记忆冒充外部搜索。",
+            "用户请求 GitHub、网页、外部搜索或实时查询，但当前没有匹配的外部 MCP server，不能用 RAG 或记忆冒充外部搜索。",
             PlannerTaskType.GENERAL_QA,
             SubIntent.NONE,
             AnswerRequirement.normal(),
@@ -145,7 +145,7 @@ public class PlannerService {
             "说明当前无法执行外部搜索",
             0,
             "无可用外部工具，停止工具调用",
-            "必须明确说明当前没有可用的 GitHub/外部搜索工具，因此没有实际执行实时搜索；不要声称已经搜索 GitHub、网页或最新结果。如果提到历史记忆，只能说是历史记录，不代表当前 GitHub 实时结果。");
+            "必须明确说明当前没有可用的 GitHub/网页/外部搜索 MCP 工具，因此没有实际执行实时搜索；不要声称已经搜索 GitHub、网页或最新结果。如果提到历史记忆，只能说是历史记录，不代表当前实时结果。");
     }
 
     private ChatPlan externalMcpRouterFallbackPlan(String question) {
@@ -187,7 +187,17 @@ public class PlannerService {
             .map(server -> String.valueOf(server.get("name")).trim())
             .filter(name -> !name.isBlank())
             .filter(name -> !"self-local".equals(name))
-            .anyMatch(name -> !requiresGithub(text) || "github".equalsIgnoreCase(name));
+            .anyMatch(name -> matchesExternalServer(text, name));
+    }
+
+    private boolean matchesExternalServer(String text, String serverName) {
+        if (requiresGithub(text)) {
+            return "github".equalsIgnoreCase(serverName);
+        }
+        if (requiresWebSearch(text)) {
+            return "web-search".equalsIgnoreCase(serverName);
+        }
+        return true;
     }
 
     private boolean requiresGithub(String text) {
@@ -198,6 +208,24 @@ public class PlannerService {
             || text.contains("repository")
             || text.contains("commit")
             || text.contains("readme");
+    }
+
+    private boolean requiresWebSearch(String text) {
+        return text.contains("网页")
+            || text.contains("联网")
+            || text.contains("网上")
+            || text.contains("上网")
+            || text.contains("新闻")
+            || text.contains("最新")
+            || text.contains("实时")
+            || text.contains("外部搜索")
+            || text.contains("搜索一下")
+            || text.contains("搜一下")
+            || text.contains("事实核验")
+            || text.contains("核验")
+            || text.contains("查证")
+            || text.contains("外部资料")
+            || text.contains("网上资料");
     }
 
     private String normalize(String value) {

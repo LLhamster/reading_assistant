@@ -142,6 +142,21 @@ public class McpServerConfig {
                         property("selectedContext", "string", "Surrounding selected context.")),
                     List.of()),
                 (exchange, request) -> result(tools.contextGetCurrentPage(request.arguments())))
+            .toolCall(tool("web_search",
+                    "Search public web pages for current or external information. Returns structured results with title, url, snippet, publishedAt, source, and summary.",
+                    properties(
+                        property("query", "string", "Web search query."),
+                        property("topK", "integer", "Maximum result count. Defaults to 5."),
+                        property("lang", "string", "Optional language or locale hint, such as zh-CN or en-US."),
+                        property("timeRange", "string", "Optional freshness hint such as day, week, month, or year.")),
+                    List.of("query")),
+                (exchange, request) -> result(tools.webSearch(request.arguments())))
+            .toolCall(tool("web_fetch",
+                    "Fetch a public web page by URL and return structured page evidence with title, url, source, publishedAt, summary, and content.",
+                    properties(
+                        property("url", "string", "Public web page URL to fetch.")),
+                    List.of("url")),
+                (exchange, request) -> result(tools.webFetch(request.arguments())))
             .build();
     }
 
