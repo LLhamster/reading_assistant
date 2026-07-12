@@ -809,17 +809,6 @@ class _WebReaderScreenState extends State<WebReaderScreen> {
           children: [
             if (error == null) WebViewWidget(controller: controller) else ErrorBlock(message: error!, onRetry: _loadReader),
             if (loading) const LinearProgressIndicator(minHeight: 2),
-            if (error == null && !aiOpen)
-              Positioned(
-                right: 18,
-                bottom: 22 + MediaQuery.of(context).padding.bottom,
-                child: FloatingActionButton(
-                  heroTag: 'web-reader-ai',
-                  tooltip: 'AI 助读',
-                  onPressed: _openAiPanel,
-                  icon: const Icon(Icons.auto_awesome),
-                ),
-              ),
           ],
         ),
       ),

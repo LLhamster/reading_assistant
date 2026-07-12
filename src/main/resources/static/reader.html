@@ -7,9 +7,12 @@
   <script>
     try {
       document.documentElement.dataset.theme = localStorage.getItem('readerTheme') || 'day';
-      if (new URLSearchParams(location.search).get('mobile') === '1') {
-        document.documentElement.classList.add('mobile-reader');
-      }
+        if (new URLSearchParams(location.search).get('mobile') === '1') {
+            document.documentElement.classList.add('mobile-reader');
+        }
+        if (new URLSearchParams(location.search).get('app') === 'flutter') {
+            document.documentElement.classList.add('flutter-webview');
+        }
     } catch (_) {
       document.documentElement.dataset.theme = 'day';
     }
@@ -923,6 +926,8 @@
       z-index: 220;
       display: none;
       align-items: center;
+      box-sizing: border-box;
+      max-width: calc(100vw - 16px);
       padding: 5px;
       border: 1px solid var(--floating-border);
       border-radius: 9px;
@@ -957,6 +962,8 @@
     .annotation-mark-picker {
       display: none;
       align-items: center;
+      flex-wrap: wrap;
+      max-width: 100%;
       gap: 7px;
       padding: 7px 7px 5px;
       border-top: 1px solid var(--floating-border);
@@ -1000,6 +1007,14 @@
       border-color: var(--accent);
       background: var(--accent);
       color: #fff;
+    }
+
+    .mobile-ai-launcher {
+      display: none;
+    }
+
+    html.flutter-webview .annotation-toolbar:not(.existing-annotation-toolbar) {
+      display: none !important;
     }
 
     .annotation-editor-mark-options {
@@ -1976,6 +1991,34 @@
       pointer-events: auto;
     }
 
+    html.mobile-reader .mobile-ai-launcher {
+      display: block;
+      position: fixed;
+      right: 18px;
+      bottom: calc(env(safe-area-inset-bottom) + 86px);
+      z-index: 75;
+      width: 52px;
+      height: 52px;
+      padding: 0;
+      border: 0;
+      border-radius: 50%;
+      background: #a7f0c4;
+      color: #14633f;
+      box-shadow: 0 8px 24px rgba(20, 80, 50, 0.2);
+      font-size: 25px;
+      line-height: 1;
+      opacity: 0;
+      transform: translateY(12px) scale(.92);
+      pointer-events: none;
+      transition: opacity .2s ease, transform .2s ease;
+    }
+
+    html.mobile-reader .reader-style-toolbar.mobile-visible + .mobile-ai-launcher {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+
     html.mobile-reader .reader-style-toolbar span {
       display: none;
     }
@@ -2070,6 +2113,7 @@
     html.mobile-reader .annotation-toolbar {
       z-index: 260;
       max-width: calc(100vw - 24px);
+      box-sizing: border-box;
       overflow-x: auto;
       border-radius: 18px;
       -webkit-overflow-scrolling: touch;
@@ -2077,10 +2121,28 @@
     }
 
     html.mobile-reader .annotation-action {
-      min-width: 64px;
-      padding: 11px 14px;
+      min-width: 58px;
+      max-width: calc(100vw - 32px);
+      padding: 11px 12px;
       font-size: 14px;
       white-space: nowrap;
+    }
+
+    html.mobile-reader .annotation-toolbar.picking {
+      max-width: calc(100vw - 24px);
+      overflow: visible;
+    }
+
+    html.mobile-reader .annotation-toolbar.picking .annotation-mark-picker {
+      justify-content: center;
+      overflow: visible;
+    }
+
+    html.mobile-reader .annotation-style-choice,
+    html.mobile-reader .annotation-picker-save {
+      min-width: 54px;
+      height: 36px;
+      font-size: 14px;
     }
 
     .mobile-toc-overlay {
@@ -2224,6 +2286,7 @@
         </select>
         <button id="readerThemeToggle" class="theme-toggle" type="button" onclick="toggleReaderTheme()" title="切换日间或夜间阅读模式">🌙 夜间</button>
       </div>
+      <button id="mobileAiLauncher" class="mobile-ai-launcher" type="button" aria-label="AI 助读" title="AI 助读" onclick="openMobileAiPanel()">✦</button>
 
       <div class="reader-content" id="chapterContent">
 在这里开始您的阅读之旅...
@@ -2282,8 +2345,10 @@
 
 <div class="annotation-toolbar" id="annotationToolbar">
   <div class="annotation-toolbar-main">
+    <button class="annotation-action annotation-copy-action" type="button">复制</button>
     <button class="annotation-action annotation-highlight-action" type="button">划词</button>
     <button class="annotation-action annotation-write" type="button">写想法</button>
+    <button class="annotation-action annotation-query-action" type="button">询问</button>
   </div>
   <div class="annotation-mark-picker">
     <button class="annotation-style-choice active" type="button" data-style="highlight">色块</button>
@@ -4394,7 +4459,13 @@ document.getElementById('chapterContent').addEventListener('pointerdown', functi
   renderSelectedReadingContext();
 });
 document.getElementById('chapterContent').addEventListener('touchend', function() {
-  setTimeout(captureReadingSelection, 0);
+  setTimeout(captureReadingSelection, 80);
+  setTimeout(captureReadingSelection, 260);
+});
+document.addEventListener('selectionchange', function() {
+  if (!isMobileReader) return;
+  window.clearTimeout(window._readingSelectionTimer);
+  window._readingSelectionTimer = window.setTimeout(captureReadingSelection, 90);
 });
 document.getElementById('chapterContent').addEventListener('click', function(e) {
   const mark = e.target.closest('.reading-highlight');
@@ -4421,6 +4492,12 @@ document.getElementById('chapterContent').addEventListener('click', function(e) 
 });
 document.querySelector('#annotationToolbar .annotation-highlight-action')
   .addEventListener('click', openAnnotationMarkPicker);
+document.querySelector('#annotationToolbar .annotation-copy-action')
+  .addEventListener('click', async () => {
+    if (!pendingAnnotationAnchor) return;
+    await navigator.clipboard.writeText(pendingAnnotationAnchor.selectedText || '');
+    hideAnnotationToolbar();
+  });
 document.querySelector('#annotationToolbar .annotation-write').addEventListener('click', () => {
   if (!hasAuthUser()) {
     hideAnnotationToolbar();
@@ -4429,6 +4506,16 @@ document.querySelector('#annotationToolbar .annotation-write').addEventListener(
   }
   openAnnotationEditor(null);
 });
+document.querySelector('#annotationToolbar .annotation-query-action')
+  .addEventListener('click', () => {
+    if (!pendingAnnotationAnchor) return;
+    selectedReadingContext = {
+      selectedText: trimText(pendingAnnotationAnchor.selectedText || '', 500),
+      selectedContext: trimText(pendingAnnotationAnchor.selectedText || '', 1400)
+    };
+    renderSelectedReadingContext();
+    if (window.openMobileAiPanel) window.openMobileAiPanel();
+  });
 document.querySelectorAll('#annotationToolbar .annotation-mark-picker [data-style]').forEach(button => {
   button.addEventListener('click', () => {
     markPickerStyle = button.dataset.style;
