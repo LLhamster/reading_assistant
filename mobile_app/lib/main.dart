@@ -13,7 +13,7 @@ const apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
   defaultValue: 'http://localhost:8080',
 );
-const readerMobileVersion = '20260712-webview-v4';
+const readerMobileVersion = '20260712-webview-v6';
 
 const paper = Color(0xFFF7F3EA);
 const paperDark = Color(0xFF191814);
