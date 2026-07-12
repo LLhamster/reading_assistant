@@ -13,6 +13,7 @@ const apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
   defaultValue: 'http://localhost:8080',
 );
+const readerMobileVersion = '20260712-webview-v4';
 
 const paper = Color(0xFFF7F3EA);
 const paperDark = Color(0xFF191814);
@@ -616,15 +617,24 @@ class WebReaderScreen extends StatefulWidget {
 }
 
 class _WebReaderScreenState extends State<WebReaderScreen> {
+  static const MethodChannel selectionChannel = MethodChannel('reader_selection_actions');
   late final WebViewController controller;
   bool loading = true;
   String? error;
+  bool aiOpen = false;
 
   @override
   void initState() {
     super.initState();
     controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..addJavaScriptChannel(
+        'ReaderUi',
+        onMessageReceived: (message) {
+          if (!mounted) return;
+          setState(() => aiOpen = message.message == 'ai-open');
+        },
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (_) => setState(() {
@@ -644,7 +654,21 @@ class _WebReaderScreenState extends State<WebReaderScreen> {
           },
         ),
       );
+    selectionChannel.setMethodCallHandler(_handleSelectionAction);
     _loadReader();
+  }
+
+  @override
+  void dispose() {
+    selectionChannel.setMethodCallHandler(null);
+    super.dispose();
+  }
+
+  Future<void> _handleSelectionAction(MethodCall call) async {
+    if (call.method != 'selectionAction') return;
+    final action = call.arguments?.toString() ?? '';
+    if (action.isEmpty) return;
+    await controller.runJavaScript("window.mobileSelectionAction && window.mobileSelectionAction('$action');");
   }
 
   Future<void> _loadReader() async {
@@ -654,6 +678,7 @@ class _WebReaderScreenState extends State<WebReaderScreen> {
         'mobile': '1',
         'bookId': widget.bookId.toString(),
         'app': 'flutter',
+        'v': readerMobileVersion,
       },
     );
     await controller.loadRequest(uri);
@@ -682,12 +707,49 @@ class _WebReaderScreenState extends State<WebReaderScreen> {
       (function() {
         var auth = $authJson;
         localStorage.setItem('readerCurrentUser', JSON.stringify(auth));
-        if (typeof window.openMobileBook === 'function') {
-          window.openMobileBook(${widget.bookId}, auth);
-        } else {
-          if (typeof restoreUser === 'function') restoreUser();
-          if (typeof updateUserStatus === 'function') updateUserStatus();
-          if (typeof openBook === 'function') openBook(${widget.bookId});
+        document.documentElement.classList.add('mobile-reader');
+        if (!document.getElementById('flutterMobileReaderPatch')) {
+          var style = document.createElement('style');
+          style.id = 'flutterMobileReaderPatch';
+          style.textContent = [
+            'html.mobile-reader .ai-panel{position:fixed !important;inset:0 !important;width:100vw !important;height:100vh !important;max-height:none !important;margin:0 !important;border:0 !important;border-radius:0 !important;transform:translateY(105%) !important;pointer-events:none !important;z-index:1000 !important;}',
+            'html.mobile-reader .ai-panel.mobile-open{transform:translateY(0) !important;pointer-events:auto !important;}',
+            'html.mobile-reader .ai-panel:focus-within:not(.mobile-open){transform:translateY(105%) !important;pointer-events:none !important;}',
+            'html.mobile-reader .ai-panel-header{padding-top:calc(env(safe-area-inset-top) + 18px) !important;}',
+            'html.mobile-reader .ai-messages{max-height:none !important;}',
+            'html.mobile-reader .ai-panel-tabs{display:none !important;}',
+            'html.mobile-reader .ai-subtitle,html.mobile-reader .ai-session,html.mobile-reader .ai-profile-actions{display:none !important;}',
+            'html.mobile-reader .reader-style-toolbar:not(.mobile-visible){transform:translateY(calc(100% + 22px)) !important;opacity:0 !important;pointer-events:none !important;z-index:70 !important;}',
+            'html.mobile-reader .reader-style-toolbar.mobile-visible{bottom:calc(env(safe-area-inset-bottom) + 12px) !important;z-index:70 !important;}',
+            'html.mobile-reader .annotation-toolbar{z-index:260 !important;}'
+          ].join('\\n');
+          document.head.appendChild(style);
+        }
+        window.openMobileAiPanel = function() {
+          var panel = document.querySelector('.ai-panel');
+          if (!panel) return;
+          panel.classList.add('mobile-open');
+          if (window.ReaderUi) ReaderUi.postMessage('ai-open');
+          if (typeof switchReaderSideTab === 'function') switchReaderSideTab('agent');
+          setTimeout(function() {
+            var input = document.getElementById('aiQuestionInput');
+            if (input && !input.disabled) input.focus();
+          }, 180);
+        };
+        window.closeMobileAiPanel = function() {
+          var panel = document.querySelector('.ai-panel');
+          if (panel) panel.classList.remove('mobile-open');
+          if (window.ReaderUi) ReaderUi.postMessage('ai-close');
+        };
+        if (typeof restoreUser === 'function') restoreUser();
+        if (typeof updateUserStatus === 'function') updateUserStatus();
+        if (typeof openBook === 'function') {
+          var content = document.getElementById('chapterContent');
+          var hasContent = content && content.textContent && content.textContent.trim().length > 0;
+          var activeBookId = typeof currentBookId === 'undefined' ? null : currentBookId;
+          if (Number(activeBookId) !== ${widget.bookId} || !hasContent) {
+            openBook(${widget.bookId});
+          }
         }
       })();
     ''';
@@ -699,11 +761,27 @@ class _WebReaderScreenState extends State<WebReaderScreen> {
   }
 
   Future<bool> _handleBack() async {
+    if (aiOpen) {
+      await controller.runJavaScript('window.closeMobileAiPanel && window.closeMobileAiPanel();');
+      if (mounted) setState(() => aiOpen = false);
+      return false;
+    }
     if (await controller.canGoBack()) {
       await controller.goBack();
       return false;
     }
     return true;
+  }
+
+  Future<void> _openAiPanel() async {
+    try {
+      await controller.runJavaScript('window.openMobileAiPanel && window.openMobileAiPanel();');
+      if (mounted) setState(() => aiOpen = true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('AI 面板打开失败：$e')));
+      }
+    }
   }
 
   @override
@@ -729,11 +807,19 @@ class _WebReaderScreenState extends State<WebReaderScreen> {
         ),
         body: Stack(
           children: [
-            if (error == null)
-              WebViewWidget(controller: controller)
-            else
-              ErrorBlock(message: error!, onRetry: _loadReader),
+            if (error == null) WebViewWidget(controller: controller) else ErrorBlock(message: error!, onRetry: _loadReader),
             if (loading) const LinearProgressIndicator(minHeight: 2),
+            if (error == null && !aiOpen)
+              Positioned(
+                right: 18,
+                bottom: 22 + MediaQuery.of(context).padding.bottom,
+                child: FloatingActionButton(
+                  heroTag: 'web-reader-ai',
+                  tooltip: 'AI 助读',
+                  onPressed: _openAiPanel,
+                  icon: const Icon(Icons.auto_awesome),
+                ),
+              ),
           ],
         ),
       ),
