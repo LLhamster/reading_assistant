@@ -19,6 +19,9 @@ public enum ErrorCode {
     // 权限 403xx
     FORBIDDEN(40301, "无权限访问", 403),
 
+    // 限流 429xx
+    TOO_MANY_REQUESTS(42901, "请求过于频繁，请稍后再试", 429),
+
     // 资源 404xx
     RESOURCE_NOT_FOUND(40401, "资源不存在", 404),
     BOOK_NOT_FOUND(40411, "书籍不存在", 404),

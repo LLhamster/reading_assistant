@@ -1,6 +1,9 @@
 package com.example.httpreading.security;
 
+import java.util.List;
+
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -12,6 +15,9 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 @Configuration
 @EnableWebSecurity
@@ -22,6 +28,9 @@ public class SecurityConfig {
 
     @Autowired
     private AccessDeniedErrorHandler accessDeniedHandler;
+
+    @Value("${app.cors.allowed-origins:http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173}")
+    private List<String> allowedOrigins;
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -40,15 +49,10 @@ public class SecurityConfig {
                         // 公开接口
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/books/**").permitAll()
-                        .requestMatchers("/api/admin/**").permitAll()
-                        .requestMatchers("/api/reading/**").permitAll()
-                        .requestMatchers("/api/jobs/**").permitAll()
-                        .requestMatchers("/api/news/**").permitAll()
-                        .requestMatchers("/api/translate/**").permitAll()
+                        .requestMatchers("/api/mobile/books/**").permitAll()
                         .requestMatchers("/api/search/**").permitAll()
-                        .requestMatchers("/api/ai/**").permitAll()
-                        .requestMatchers("/api/cognition/**").permitAll()
                         .requestMatchers("/mcp", "/mcp/**").permitAll()
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         // 页面和静态资源
                         .requestMatchers(HttpMethod.GET, "/", "/reader.html", "/static/**").permitAll()
                         // 其他请求需要登录
@@ -59,5 +63,20 @@ public class SecurityConfig {
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowedOrigins(allowedOrigins);
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "X-Requested-With"));
+        configuration.setExposedHeaders(List.of("Authorization"));
+        configuration.setAllowCredentials(true);
+        configuration.setMaxAge(3600L);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+        return source;
     }
 }
