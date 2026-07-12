@@ -55,15 +55,35 @@ public class ReadingController {
     @PostMapping("/{bookId}/progress")
     public CommonResponse<Reading> updateProgress(@PathVariable @Positive Long bookId, 
                                         HttpServletRequest request,
-                                            @RequestBody Map<String, Integer>body){
+                                            @RequestBody Map<String, Object> body){
         
-        Integer index = body.get("chapterIndex");
-        Integer offset = body.getOrDefault("offset", 0);
+        Integer index = intValue(body.get("chapterIndex"));
+        Integer offset = intValue(body.getOrDefault("offset", 0));
+        Integer anchorOffset = intValue(body.get("anchorOffset"));
+        String anchorText = stringValue(body.get("anchorText"));
+        String prefixText = stringValue(body.get("prefixText"));
+        String suffixText = stringValue(body.get("suffixText"));
         Long userId = getUserId(request);
         if(index == null || offset ==null) throw new IllegalArgumentException("记录进度时没有章节号");
         log.info("更新阅读进度 - userId:{}, bookId:{}, chapterIndex:{}, offset:{}", userId, bookId, index, offset);
-        Reading reading = readingService.updateProgress(bookId, userId, index, offset);
+        Reading reading = readingService.updateProgress(bookId, userId, index, offset, anchorText, prefixText, suffixText, anchorOffset);
         log.info("更新阅读进度完成 - userId:{}, bookId:{}", userId, bookId);
         return CommonResponse.success(reading);
+    }
+
+    private Integer intValue(Object value) {
+        if (value == null) return null;
+        if (value instanceof Number number) return number.intValue();
+        try {
+            return Integer.parseInt(value.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private String stringValue(Object value) {
+        if (value == null) return null;
+        String text = value.toString().trim();
+        return text.isEmpty() ? null : text;
     }
 }

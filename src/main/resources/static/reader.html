@@ -77,7 +77,13 @@
     }
 
     ::selection {
-      background: var(--accent-light);
+      background: rgba(184, 91, 59, 0.34);
+      color: var(--text-primary);
+    }
+
+    .reader-content ::selection,
+    #chapterContent ::selection {
+      background: rgba(38, 151, 102, 0.34);
       color: var(--text-primary);
     }
 
@@ -1958,6 +1964,14 @@
     <button class="annotation-picker-save" type="button">确定</button>
   </div>
 </div>
+<div class="annotation-toolbar existing-annotation-toolbar" id="existingAnnotationToolbar">
+  <div class="annotation-toolbar-main">
+    <button class="annotation-action" id="existingCopyBtn" type="button">复制</button>
+    <button class="annotation-action" id="existingDeleteBtn" type="button">删除划线</button>
+    <button class="annotation-action" id="existingThoughtBtn" type="button">写想法</button>
+    <button class="annotation-action" id="existingQueryBtn" type="button">查询</button>
+  </div>
+</div>
 
 <div class="annotation-overlay" id="annotationOverlay">
   <div class="annotation-editor">
@@ -2135,6 +2149,7 @@ let markPickerStyle = 'highlight';
 let markPickerColor = 'yellow';
 let annotationEditorStyle = 'highlight';
 let annotationEditorColor = 'yellow';
+let activeExistingAnnotation = null;
 let readingDialogAction = null;
 let orphanedAnnotationIds = new Set();
 let readingProgressSaveTimer = null;
@@ -2435,6 +2450,26 @@ function showAnnotationToolbar(rect) {
 function hideAnnotationToolbar() {
   const toolbar = document.getElementById('annotationToolbar');
   if (toolbar) toolbar.classList.remove('active', 'picking');
+  hideExistingAnnotationToolbar();
+}
+
+function showExistingAnnotationToolbar(annotation, rect) {
+  activeExistingAnnotation = annotation;
+  const toolbar = document.getElementById('existingAnnotationToolbar');
+  if (!toolbar) return;
+  document.getElementById('existingThoughtBtn').textContent = annotation.noteContent ? '修改想法' : '写想法';
+  toolbar.classList.add('active');
+  const width = toolbar.offsetWidth || 260;
+  const left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.left + rect.width / 2 - width / 2));
+  const top = Math.max(8, rect.top - 52);
+  toolbar.style.left = left + 'px';
+  toolbar.style.top = top + 'px';
+}
+
+function hideExistingAnnotationToolbar() {
+  activeExistingAnnotation = null;
+  const toolbar = document.getElementById('existingAnnotationToolbar');
+  if (toolbar) toolbar.classList.remove('active');
 }
 
 async function createAnnotation(color, noteContent, markStyle) {
@@ -2916,7 +2951,7 @@ async function openBook(bookId) {
       ? progress.chapterIndex
       : (availableIndexes[0] || 1);
     await loadCurrentChapter();
-    await restoreReadingOffset(progress ? progress.offset : 0);
+    await restoreReadingOffset(progress || { offset: 0 });
   } catch (e) {
     console.error(e);
   } finally {
@@ -3133,10 +3168,15 @@ async function saveReadingProgress(forcedOffset) {
   if (suppressReadingProgressTracking && forcedOffset == null) return;
   if (!hasAuthUser() || !currentBookId || !currentChapterIndex) return;
   const offset = forcedOffset == null ? currentReadingOffset() : forcedOffset;
+  const anchor = forcedOffset == null ? currentReadingAnchor() : null;
   try {
     await api('POST', '/api/user/books/' + currentBookId + '/progress', {
       chapterIndex: currentChapterIndex,
-      offset
+      offset,
+      anchorText: anchor ? anchor.anchorText : null,
+      prefixText: anchor ? anchor.prefixText : null,
+      suffixText: anchor ? anchor.suffixText : null,
+      anchorOffset: anchor ? anchor.anchorOffset : null
     });
   } catch (e) {
     console.warn('阅读进度保存失败', e);
@@ -3149,7 +3189,7 @@ function scheduleReadingProgressSave() {
   readingProgressSaveTimer = window.setTimeout(() => saveReadingProgress(), 800);
 }
 
-async function restoreReadingOffset(offset) {
+async function restoreReadingOffset(progressOrOffset) {
   const content = document.getElementById('chapterContent');
   if (!content) return;
   const images = Array.from(content.querySelectorAll('img'));
@@ -3163,10 +3203,110 @@ async function restoreReadingOffset(offset) {
     new Promise(resolve => window.setTimeout(resolve, 1000))
   ]);
   const contentTop = content.getBoundingClientRect().top + window.scrollY;
+  const progress = typeof progressOrOffset === 'object' && progressOrOffset
+    ? progressOrOffset
+    : { offset: progressOrOffset };
+  const anchorOffset = resolveProgressAnchorInElement(content, progress);
+  if (anchorOffset != null) {
+    const rect = rectForTextOffset(content, anchorOffset);
+    if (rect) {
+      window.scrollTo({ top: window.scrollY + rect.top - 18, behavior: 'auto' });
+      return;
+    }
+  }
   window.scrollTo({
-    top: contentTop + Math.max(0, Number(offset) || 0),
+    top: contentTop + Math.max(0, Number(progress.offset) || 0),
     behavior: 'auto'
   });
+}
+
+function currentReadingAnchor() {
+  const root = annotationTextRoot();
+  if (!root) return null;
+  const offset = textOffsetNearViewportTop(root);
+  const text = root.textContent || '';
+  const normalizedOffset = Math.max(0, Math.min(offset, text.length));
+  const anchorText = text.slice(normalizedOffset, normalizedOffset + 120).trim();
+  return {
+    anchorText,
+    anchorOffset: normalizedOffset,
+    prefixText: text.slice(Math.max(0, normalizedOffset - 120), normalizedOffset),
+    suffixText: text.slice(normalizedOffset + anchorText.length, normalizedOffset + anchorText.length + 120)
+  };
+}
+
+function textOffsetNearViewportTop(root) {
+  const rect = root.getBoundingClientRect();
+  const x = Math.max(8, Math.min(window.innerWidth - 8, rect.left + 24));
+  const y = Math.max(8, Math.min(window.innerHeight - 8, Math.max(rect.top, 0) + 18));
+  let range = null;
+  if (document.caretPositionFromPoint) {
+    const pos = document.caretPositionFromPoint(x, y);
+    if (pos) {
+      range = document.createRange();
+      range.setStart(pos.offsetNode, pos.offset);
+    }
+  } else if (document.caretRangeFromPoint) {
+    range = document.caretRangeFromPoint(x, y);
+  }
+  if (!range || !root.contains(range.startContainer)) {
+    return Math.max(0, currentReadingOffset());
+  }
+  const offsetRange = document.createRange();
+  offsetRange.selectNodeContents(root);
+  offsetRange.setEnd(range.startContainer, range.startOffset);
+  return offsetRange.toString().length;
+}
+
+function resolveProgressAnchorInElement(root, progress) {
+  const text = root.textContent || '';
+  const anchor = (progress.anchorText || '').trim();
+  if (!anchor) return null;
+  return resolveTextAnchor(text, anchor, progress.prefixText || '', progress.suffixText || '', Number(progress.anchorOffset || progress.offset || 0));
+}
+
+function resolveTextAnchor(text, anchor, prefix, suffix, preferredOffset) {
+  if (!anchor) return null;
+  const start = Number(preferredOffset);
+  if (Number.isFinite(start) && start >= 0 && text.slice(start, start + anchor.length) === anchor) {
+    return start;
+  }
+  let best = null;
+  let from = 0;
+  while (from <= text.length) {
+    const index = text.indexOf(anchor, from);
+    if (index < 0) break;
+    let score = -Math.abs(index - (Number.isFinite(start) ? start : index)) / 1000;
+    if (prefix) {
+      const comparable = prefix.slice(-Math.min(prefix.length, index, 120));
+      if (text.slice(index - comparable.length, index) === comparable) score += comparable.length;
+    }
+    if (suffix) {
+      const comparable = suffix.slice(0, 120);
+      if (text.slice(index + anchor.length, index + anchor.length + comparable.length) === comparable) score += comparable.length;
+    }
+    if (!best || score > best.score) best = { index, score };
+    from = index + Math.max(1, anchor.length);
+  }
+  return best ? best.index : null;
+}
+
+function rectForTextOffset(root, offset) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node;
+  let cursor = 0;
+  while ((node = walker.nextNode())) {
+    const next = cursor + node.data.length;
+    if (next >= offset) {
+      const range = document.createRange();
+      const local = Math.max(0, Math.min(node.data.length, offset - cursor));
+      range.setStart(node, local);
+      range.setEnd(node, Math.min(node.data.length, local + 1));
+      return range.getBoundingClientRect();
+    }
+    cursor = next;
+  }
+  return null;
 }
 
 async function addCurrentBookToShelf() {
@@ -3788,7 +3928,11 @@ document.getElementById('chapterContent').addEventListener('click', function(e) 
   const annotation = currentAnnotations.find(item => String(item.id) === mark.dataset.annotationId);
   if (annotation) {
     e.preventDefault();
-    openAnnotationEditor(annotation);
+    if (annotation.noteContent) {
+      openAnnotationEditor(annotation);
+    } else {
+      showExistingAnnotationToolbar(annotation, mark.getBoundingClientRect());
+    }
   }
 });
 document.querySelector('#annotationToolbar .annotation-highlight-action')
@@ -3815,6 +3959,34 @@ document.querySelectorAll('#annotationToolbar .annotation-mark-picker [data-colo
 });
 document.querySelector('#annotationToolbar .annotation-picker-save').addEventListener('click', () => {
   createAnnotation(markPickerColor, null, markPickerStyle);
+});
+document.getElementById('existingCopyBtn').addEventListener('click', async () => {
+  if (!activeExistingAnnotation) return;
+  await navigator.clipboard.writeText(activeExistingAnnotation.selectedText || '');
+  hideExistingAnnotationToolbar();
+});
+document.getElementById('existingDeleteBtn').addEventListener('click', () => {
+  if (!activeExistingAnnotation) return;
+  const annotation = activeExistingAnnotation;
+  hideExistingAnnotationToolbar();
+  editingAnnotation = annotation;
+  deleteEditingAnnotation();
+});
+document.getElementById('existingThoughtBtn').addEventListener('click', () => {
+  if (!activeExistingAnnotation) return;
+  const annotation = activeExistingAnnotation;
+  hideExistingAnnotationToolbar();
+  openAnnotationEditor(annotation);
+});
+document.getElementById('existingQueryBtn').addEventListener('click', () => {
+  if (!activeExistingAnnotation) return;
+  selectedReadingContext = {
+    selectedText: trimText(activeExistingAnnotation.selectedText || '', 500),
+    selectedContext: trimText(activeExistingAnnotation.selectedText || '', 1400)
+  };
+  renderSelectedReadingContext();
+  hideExistingAnnotationToolbar();
+  document.getElementById('aiQuestionInput').focus();
 });
 document.querySelectorAll('#annotationEditorMarkOptions [data-style]').forEach(button => {
   button.addEventListener('click', () => {

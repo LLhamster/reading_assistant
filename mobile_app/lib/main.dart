@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,6 +12,12 @@ const apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
   defaultValue: 'http://localhost:8080',
 );
+
+const paper = Color(0xFFF7F3EA);
+const paperDark = Color(0xFF191814);
+const ink = Color(0xFF24211C);
+const mutedInk = Color(0xFF7D7568);
+const wereadGreen = Color(0xFF19B36B);
 
 void main() {
   runApp(const ReadingMobileApp());
@@ -23,6 +31,8 @@ class ReadingMobileApp extends StatefulWidget {
 }
 
 class _ReadingMobileAppState extends State<ReadingMobileApp> {
+  final navigatorKey = GlobalKey<NavigatorState>();
+  final scaffoldMessengerKey = GlobalKey<ScaffoldMessengerState>();
   late final ApiClient api;
   AuthSession? session;
   bool restoring = true;
@@ -50,20 +60,25 @@ class _ReadingMobileAppState extends State<ReadingMobileApp> {
     await api.logout();
     if (!mounted) return;
     setState(() => session = null);
-    ScaffoldMessenger.of(context).showSnackBar(
+    scaffoldMessengerKey.currentState?.showSnackBar(
       const SnackBar(content: Text('登录已过期，请重新登录')),
     );
   }
 
-  Future<void> _openLogin() async {
+  Future<AuthSession?> _openLogin() async {
+    final sheetContext = navigatorKey.currentContext;
+    if (sheetContext == null) return null;
     final result = await showModalBottomSheet<AuthSession>(
-      context: context,
+      context: sheetContext,
       isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Theme.of(sheetContext).colorScheme.surface,
       builder: (_) => LoginSheet(api: api),
     );
     if (result != null && mounted) {
       setState(() => session = result);
     }
+    return result;
   }
 
   Future<void> _toggleTheme() async {
@@ -77,13 +92,51 @@ class _ReadingMobileAppState extends State<ReadingMobileApp> {
     return MaterialApp(
       title: 'HTTP Reading',
       debugShowCheckedModeBanner: false,
+      navigatorKey: navigatorKey,
+      scaffoldMessengerKey: scaffoldMessengerKey,
       themeMode: darkMode ? ThemeMode.dark : ThemeMode.light,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal),
+        colorScheme: ColorScheme.fromSeed(seedColor: wereadGreen, surface: paper),
+        scaffoldBackgroundColor: paper,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: paper,
+          surfaceTintColor: Colors.transparent,
+          foregroundColor: ink,
+          centerTitle: false,
+          elevation: 0,
+        ),
+        cardTheme: CardThemeData(
+          color: Colors.white.withValues(alpha: 0.82),
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+        textSelectionTheme: TextSelectionThemeData(
+          selectionColor: wereadGreen.withValues(alpha: 0.32),
+          selectionHandleColor: wereadGreen,
+        ),
         useMaterial3: true,
       ),
       darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal, brightness: Brightness.dark),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: wereadGreen,
+          brightness: Brightness.dark,
+          surface: paperDark,
+        ),
+        scaffoldBackgroundColor: paperDark,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: paperDark,
+          surfaceTintColor: Colors.transparent,
+          centerTitle: false,
+          elevation: 0,
+        ),
+        cardTheme: CardThemeData(
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+        textSelectionTheme: TextSelectionThemeData(
+          selectionColor: wereadGreen.withValues(alpha: 0.36),
+          selectionHandleColor: wereadGreen,
+        ),
         useMaterial3: true,
       ),
       home: restoring
@@ -114,7 +167,7 @@ class HomeShell extends StatefulWidget {
 
   final ApiClient api;
   final AuthSession? session;
-  final Future<void> Function() onLogin;
+  final Future<AuthSession?> Function() onLogin;
   final Future<void> Function() onLogout;
   final Future<void> Function() onToggleTheme;
 
@@ -129,35 +182,36 @@ class _HomeShellState extends State<HomeShell> {
   Widget build(BuildContext context) {
     final loggedIn = widget.session != null;
     final pages = [
-      LibraryScreen(api: widget.api, onLogin: widget.onLogin),
-      BookshelfScreen(api: widget.api, loggedIn: loggedIn, onLogin: widget.onLogin),
+      BookshelfScreen(
+        api: widget.api,
+        loggedIn: loggedIn,
+        onLogin: widget.onLogin,
+        onOpenReader: _openReader,
+      ),
+      LibraryScreen(api: widget.api, onLogin: widget.onLogin, onOpenReader: _openReader),
+      ProfileScreen(
+        session: widget.session,
+        onLogin: widget.onLogin,
+        onLogout: widget.onLogout,
+        onToggleTheme: widget.onToggleTheme,
+      ),
     ];
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('HTTP Reading'),
+        title: Text(index == 0 ? '书架' : index == 1 ? '发现' : '我'),
         actions: [
-          IconButton(
-            tooltip: '切换主题',
-            icon: const Icon(Icons.contrast),
-            onPressed: widget.onToggleTheme,
-          ),
-          if (loggedIn)
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.account_circle),
-              onSelected: (value) {
-                if (value == 'logout') widget.onLogout();
-              },
-              itemBuilder: (_) => [
-                PopupMenuItem(enabled: false, child: Text(widget.session!.username)),
-                const PopupMenuItem(value: 'logout', child: Text('退出登录')),
-              ],
-            )
+          if (!loggedIn)
+            TextButton(onPressed: widget.onLogin, child: const Text('登录'))
           else
-            IconButton(
-              tooltip: '登录',
-              icon: const Icon(Icons.login),
-              onPressed: widget.onLogin,
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: Center(
+                child: Text(
+                  widget.session!.username,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
             ),
         ],
       ),
@@ -166,9 +220,24 @@ class _HomeShellState extends State<HomeShell> {
         selectedIndex: index,
         onDestinationSelected: (value) => setState(() => index = value),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.menu_book_outlined), label: '书库'),
-          NavigationDestination(icon: Icon(Icons.bookmarks_outlined), label: '书架'),
+          NavigationDestination(icon: Icon(Icons.local_library_outlined), label: '书架'),
+          NavigationDestination(icon: Icon(Icons.explore_outlined), label: '发现'),
+          NavigationDestination(icon: Icon(Icons.person_outline), label: '我'),
         ],
+      ),
+    );
+  }
+
+  Future<void> _openReader(BookSummary book) {
+    return Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ReaderScreen(
+          api: widget.api,
+          bookId: book.id,
+          initialBook: book,
+          onLogin: widget.onLogin,
+        ),
       ),
     );
   }
@@ -197,15 +266,21 @@ class _LoginSheetState extends State<LoginSheet> {
   }
 
   Future<void> _submit({required bool register}) async {
+    final name = username.text.trim();
+    final pass = password.text;
+    if (name.isEmpty || pass.isEmpty) {
+      setState(() => error = '请输入用户名和密码');
+      return;
+    }
     setState(() {
       loading = true;
       error = null;
     });
     try {
       if (register) {
-        await widget.api.register(username.text.trim(), password.text);
+        await widget.api.register(name, pass);
       }
-      final session = await widget.api.login(username.text.trim(), password.text);
+      final session = await widget.api.login(name, pass);
       if (mounted) Navigator.pop(context, session);
     } catch (e) {
       setState(() => error = e.toString());
@@ -216,53 +291,158 @@ class _LoginSheetState extends State<LoginSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.only(
-          left: 20,
-          right: 20,
-          top: 20,
-          bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('登录', style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 16),
-            TextField(controller: username, decoration: const InputDecoration(labelText: '用户名')),
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 24,
+        right: 24,
+        top: 24,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('登录阅读账号', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          const Text('登录后可同步书架、阅读进度，并使用 AI 助读。', style: TextStyle(color: mutedInk)),
+          const SizedBox(height: 20),
+          TextField(
+            controller: username,
+            textInputAction: TextInputAction.next,
+            decoration: const InputDecoration(prefixIcon: Icon(Icons.person_outline), labelText: '用户名'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: password,
+            obscureText: true,
+            decoration: const InputDecoration(prefixIcon: Icon(Icons.lock_outline), labelText: '密码'),
+            onSubmitted: (_) => _submit(register: false),
+          ),
+          if (error != null) ...[
             const SizedBox(height: 12),
-            TextField(
-              controller: password,
-              obscureText: true,
-              decoration: const InputDecoration(labelText: '密码'),
-            ),
-            if (error != null) ...[
-              const SizedBox(height: 12),
-              Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-            ],
-            const SizedBox(height: 20),
-            FilledButton.icon(
-              onPressed: loading ? null : () => _submit(register: false),
-              icon: const Icon(Icons.login),
-              label: Text(loading ? '处理中...' : '登录'),
-            ),
-            TextButton(
-              onPressed: loading ? null : () => _submit(register: true),
-              child: const Text('注册并登录'),
-            ),
+            Text(error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
           ],
+          const SizedBox(height: 20),
+          FilledButton(
+            onPressed: loading ? null : () => _submit(register: false),
+            child: Text(loading ? '处理中...' : '登录'),
+          ),
+          TextButton(
+            onPressed: loading ? null : () => _submit(register: true),
+            child: const Text('没有账号，注册并登录'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class BookshelfScreen extends StatefulWidget {
+  const BookshelfScreen({
+    super.key,
+    required this.api,
+    required this.loggedIn,
+    required this.onLogin,
+    required this.onOpenReader,
+  });
+
+  final ApiClient api;
+  final bool loggedIn;
+  final Future<AuthSession?> Function() onLogin;
+  final Future<void> Function(BookSummary book) onOpenReader;
+
+  @override
+  State<BookshelfScreen> createState() => _BookshelfScreenState();
+}
+
+class _BookshelfScreenState extends State<BookshelfScreen> {
+  List<BookSummary> books = [];
+  bool loading = false;
+  String? error;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.loggedIn) _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant BookshelfScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.loggedIn && widget.loggedIn) _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      loading = true;
+      error = null;
+    });
+    try {
+      final items = await widget.api.bookshelf();
+      setState(() => books = items);
+    } catch (e) {
+      setState(() => error = e.toString());
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.loggedIn) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.local_library_outlined, size: 56, color: wereadGreen),
+              const SizedBox(height: 18),
+              Text('登录后查看你的书架', style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 8),
+              const Text('阅读进度、收藏和 AI 记录会跟随账号保存。', textAlign: TextAlign.center, style: TextStyle(color: mutedInk)),
+              const SizedBox(height: 22),
+              FilledButton(onPressed: widget.onLogin, child: const Text('登录 / 注册')),
+            ],
+          ),
         ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
+        children: [
+          Text('最近阅读', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 12),
+          if (loading) const Center(child: CircularProgressIndicator()),
+          if (error != null) ErrorBlock(message: error!, onRetry: _load),
+          if (!loading && error == null && books.isEmpty)
+            EmptyBlock(
+              icon: Icons.bookmark_add_outlined,
+              title: '书架还是空的',
+              message: '去发现页挑一本书加入书架。',
+              actionText: '刷新',
+              onAction: _load,
+            ),
+          BookGrid(books: books, onTap: widget.onOpenReader),
+        ],
       ),
     );
   }
 }
 
 class LibraryScreen extends StatefulWidget {
-  const LibraryScreen({super.key, required this.api, required this.onLogin});
+  const LibraryScreen({
+    super.key,
+    required this.api,
+    required this.onLogin,
+    required this.onOpenReader,
+  });
 
   final ApiClient api;
-  final Future<void> Function() onLogin;
+  final Future<AuthSession?> Function() onLogin;
+  final Future<void> Function(BookSummary book) onOpenReader;
 
   @override
   State<LibraryScreen> createState() => _LibraryScreenState();
@@ -292,7 +472,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       error = null;
     });
     try {
-      final page = await widget.api.mobileBooks(keyword: keyword.text.trim());
+      final page = await widget.api.mobileBooks(keyword: keyword.text.trim(), pageSize: 12);
       setState(() => books = page);
     } catch (e) {
       setState(() => error = e.toString());
@@ -302,12 +482,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _addToShelf(BookSummary book) async {
+    if (!widget.api.isLoggedIn) {
+      final session = await widget.onLogin();
+      if (session == null) return;
+    }
     try {
       await widget.api.addToBookshelf(book.id);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已加入书架')));
-    } on UnauthorizedException {
-      await widget.onLogin();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
@@ -316,36 +498,36 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final searching = keyword.text.trim().isNotEmpty;
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(18, 8, 18, 24),
         children: [
           SearchBar(
             controller: keyword,
-            hintText: '搜索书名、作者或分类',
+            hintText: '搜索书名、作者',
             leading: const Icon(Icons.search),
             onSubmitted: (_) => _load(),
             trailing: [
               IconButton(tooltip: '搜索', icon: const Icon(Icons.arrow_forward), onPressed: _load),
             ],
           ),
-          const SizedBox(height: 16),
-          if (loading) const Center(child: CircularProgressIndicator()),
+          const SizedBox(height: 18),
+          Text(searching ? '搜索结果' : '精选书库', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 4),
+          const Text('这里只展示少量内容，搜索可以查更多书。', style: TextStyle(color: mutedInk)),
+          const SizedBox(height: 12),
+          if (loading) const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator())),
           if (error != null) ErrorBlock(message: error!, onRetry: _load),
-          for (final book in books)
-            BookTile(
-              book: book,
-              trailing: IconButton(
+          if (!loading && error == null)
+            BookGrid(
+              books: books,
+              onTap: widget.onOpenReader,
+              trailingBuilder: (book) => IconButton(
                 tooltip: '加入书架',
-                icon: const Icon(Icons.bookmark_add_outlined),
+                icon: const Icon(Icons.add_circle_outline),
                 onPressed: () => _addToShelf(book),
-              ),
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => ReaderScreen(api: widget.api, bookId: book.id, initialBook: book),
-                ),
               ),
             ),
         ],
@@ -354,89 +536,62 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 }
 
-class BookshelfScreen extends StatefulWidget {
-  const BookshelfScreen({
+class ProfileScreen extends StatelessWidget {
+  const ProfileScreen({
     super.key,
-    required this.api,
-    required this.loggedIn,
+    required this.session,
     required this.onLogin,
+    required this.onLogout,
+    required this.onToggleTheme,
   });
 
-  final ApiClient api;
-  final bool loggedIn;
-  final Future<void> Function() onLogin;
-
-  @override
-  State<BookshelfScreen> createState() => _BookshelfScreenState();
-}
-
-class _BookshelfScreenState extends State<BookshelfScreen> {
-  List<BookSummary> books = [];
-  bool loading = false;
-  String? error;
-
-  @override
-  void didUpdateWidget(covariant BookshelfScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!oldWidget.loggedIn && widget.loggedIn) _load();
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.loggedIn) _load();
-  }
-
-  Future<void> _load() async {
-    setState(() {
-      loading = true;
-      error = null;
-    });
-    try {
-      final items = await widget.api.bookshelf();
-      setState(() => books = items);
-    } catch (e) {
-      setState(() => error = e.toString());
-    } finally {
-      if (mounted) setState(() => loading = false);
-    }
-  }
+  final AuthSession? session;
+  final Future<AuthSession?> Function() onLogin;
+  final Future<void> Function() onLogout;
+  final Future<void> Function() onToggleTheme;
 
   @override
   Widget build(BuildContext context) {
-    if (!widget.loggedIn) {
-      return Center(
-        child: FilledButton.icon(
-          onPressed: widget.onLogin,
-          icon: const Icon(Icons.login),
-          label: const Text('登录后查看书架'),
-        ),
-      );
-    }
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          if (loading) const Center(child: CircularProgressIndicator()),
-          if (error != null) ErrorBlock(message: error!, onRetry: _load),
-          if (!loading && error == null && books.isEmpty)
-            const Padding(
-              padding: EdgeInsets.only(top: 80),
-              child: Center(child: Text('书架还是空的')),
-            ),
-          for (final book in books)
-            BookTile(
-              book: book,
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => ReaderScreen(api: widget.api, bookId: book.id, initialBook: book),
+    return ListView(
+      padding: const EdgeInsets.all(18),
+      children: [
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Row(
+              children: [
+                const CircleAvatar(radius: 28, child: Icon(Icons.person_outline)),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(session?.username ?? '未登录', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 4),
+                      Text(session == null ? '登录后使用书架与 AI 助读' : '已登录', style: const TextStyle(color: mutedInk)),
+                    ],
+                  ),
                 ),
-              ),
+                if (session == null)
+                  FilledButton(onPressed: onLogin, child: const Text('登录'))
+                else
+                  TextButton(onPressed: onLogout, child: const Text('退出')),
+              ],
             ),
-        ],
-      ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        ListTile(
+          leading: const Icon(Icons.contrast),
+          title: const Text('切换日夜间'),
+          onTap: onToggleTheme,
+        ),
+        const ListTile(
+          leading: Icon(Icons.cloud_outlined),
+          title: Text('当前服务'),
+          subtitle: Text(apiBaseUrl),
+        ),
+      ],
     );
   }
 }
@@ -446,38 +601,119 @@ class ReaderScreen extends StatefulWidget {
     super.key,
     required this.api,
     required this.bookId,
+    required this.onLogin,
     this.initialBook,
   });
 
   final ApiClient api;
   final int bookId;
+  final Future<AuthSession?> Function() onLogin;
   final BookSummary? initialBook;
 
   @override
   State<ReaderScreen> createState() => _ReaderScreenState();
 }
 
-class _ReaderScreenState extends State<ReaderScreen> {
+class ReaderChapterBlock {
+  const ReaderChapterBlock({
+    required this.chapterIndex,
+    required this.title,
+    required this.text,
+  });
+
+  final int chapterIndex;
+  final String title;
+  final String text;
+
+  factory ReaderChapterBlock.fromContent(ChapterContent content) {
+    final normalized = normalizeReaderText(content.contentHtml.isNotEmpty ? content.contentHtml : content.content);
+    return ReaderChapterBlock(
+      chapterIndex: content.chapterIndex,
+      title: content.title,
+      text: stripLeadingTitle(normalized, content.title),
+    );
+  }
+
+  String get displayText => title.trim().isEmpty ? text : '${title.trim()}\n\n$text';
+}
+
+class SelectedAnchor {
+  const SelectedAnchor({
+    required this.chapterIndex,
+    required this.selectedText,
+    required this.startOffset,
+    required this.endOffset,
+    required this.prefixText,
+    required this.suffixText,
+  });
+
+  final int chapterIndex;
+  final String selectedText;
+  final int startOffset;
+  final int endOffset;
+  final String prefixText;
+  final String suffixText;
+}
+
+class ResolvedAnnotation {
+  const ResolvedAnnotation({
+    required this.annotation,
+    required this.startOffset,
+    required this.endOffset,
+  });
+
+  final ReadingAnnotation annotation;
+  final int startOffset;
+  final int endOffset;
+}
+
+class ProgressAnchor {
+  const ProgressAnchor({
+    required this.chapterIndex,
+    required this.offset,
+    required this.anchorText,
+    required this.prefixText,
+    required this.suffixText,
+    required this.anchorOffset,
+  });
+
+  final int chapterIndex;
+  final int offset;
+  final String anchorText;
+  final String prefixText;
+  final String suffixText;
+  final int anchorOffset;
+}
+
+class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver {
   final scrollController = ScrollController();
   BookSummary? book;
   List<ChapterSummary> chapters = [];
+  List<ReaderChapterBlock> loadedChapterBlocks = [];
+  Map<int, List<ReadingAnnotation>> annotationsByChapter = {};
   ChapterContent? chapter;
   int chapterIndex = 1;
   double fontSize = 18;
+  double lineHeight = 1.82;
+  String fontFamily = 'system';
   bool loading = true;
-  bool aiLoading = false;
+  bool controlsVisible = false;
   String? error;
   String selectedText = '';
-  String? aiAnswer;
-  String? aiStatus;
-  List<String> aiSources = [];
+  SelectedAnchor? selectedAnchor;
+  String readerText = '';
+  bool loadingNextChapter = false;
+  bool loadingPreviousChapter = false;
+  DateTime? lastAnnotationsRefreshAt;
+  final ValueNotifier<List<AiMessage>> messages = ValueNotifier<List<AiMessage>>([]);
   Timer? progressTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     book = widget.initialBook;
-    scrollController.addListener(_scheduleProgressSave);
+    scrollController.addListener(_handleScroll);
     _restoreStyle();
     _loadInitial();
   }
@@ -486,20 +722,46 @@ class _ReaderScreenState extends State<ReaderScreen> {
   void dispose() {
     progressTimer?.cancel();
     _saveProgress();
+    WidgetsBinding.instance.removeObserver(this);
+    messages.dispose();
     scrollController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_refreshLoadedAnnotations(force: true));
+    }
   }
 
   Future<void> _restoreStyle() async {
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
-    setState(() => fontSize = prefs.getDouble('reader.fontSize') ?? 18);
+    setState(() {
+      fontSize = prefs.getDouble('reader.fontSize') ?? 18;
+      lineHeight = prefs.getDouble('reader.lineHeight') ?? 1.82;
+      fontFamily = prefs.getString('reader.fontFamily') ?? 'system';
+    });
   }
 
   Future<void> _setFontSize(double value) async {
     final prefs = await SharedPreferences.getInstance();
     setState(() => fontSize = value);
     await prefs.setDouble('reader.fontSize', value);
+  }
+
+  Future<void> _setLineHeight(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() => lineHeight = value);
+    await prefs.setDouble('reader.lineHeight', value);
+  }
+
+  Future<void> _toggleFontFamily() async {
+    final prefs = await SharedPreferences.getInstance();
+    final next = fontFamily == 'LXGWWenKai' ? 'system' : 'LXGWWenKai';
+    setState(() => fontFamily = next);
+    await prefs.setString('reader.fontFamily', next);
   }
 
   Future<void> _loadInitial() async {
@@ -511,9 +773,11 @@ class _ReaderScreenState extends State<ReaderScreen> {
       final loadedBook = book ?? await widget.api.bookDetail(widget.bookId);
       final loadedChapters = await widget.api.chapters(widget.bookId);
       int initialChapter = loadedChapters.isNotEmpty ? loadedChapters.first.chapterIndex : 1;
+      ReadingProgress? restoredProgress;
       int offset = 0;
       try {
         final progress = await widget.api.progress(widget.bookId);
+        restoredProgress = progress;
         initialChapter = progress.chapterIndex;
         offset = progress.offset;
       } catch (_) {
@@ -526,7 +790,7 @@ class _ReaderScreenState extends State<ReaderScreen> {
         chapters = loadedChapters;
         chapterIndex = initialChapter;
       });
-      await _loadChapter(initialChapter, restoreOffset: offset);
+      await _loadChapter(initialChapter, restoreOffset: offset, restoreProgress: restoredProgress);
     } catch (e) {
       setState(() => error = e.toString());
     } finally {
@@ -534,40 +798,28 @@ class _ReaderScreenState extends State<ReaderScreen> {
     }
   }
 
-  Future<void> _loadChapter(int index, {int restoreOffset = 0}) async {
+  Future<void> _loadChapter(int index, {int restoreOffset = 0, ReadingProgress? restoreProgress}) async {
     final loaded = await widget.api.chapter(widget.bookId, index);
+    final block = ReaderChapterBlock.fromContent(loaded);
     if (!mounted) return;
     setState(() {
       chapter = loaded;
       chapterIndex = index;
+      loadedChapterBlocks = [block];
+      _rebuildReaderText();
       selectedText = '';
-      aiAnswer = null;
-      aiStatus = null;
-      aiSources = [];
+      selectedAnchor = null;
     });
+    await _loadAnnotationsForChapter(index);
+    messages.value = [];
     await Future<void>.delayed(const Duration(milliseconds: 60));
     if (scrollController.hasClients) {
       final maxOffset = scrollController.position.maxScrollExtent;
-      final safeOffset = restoreOffset.clamp(0, maxOffset.toInt()).toDouble();
-      scrollController.jumpTo(safeOffset);
+      final anchorOffset = restoreProgress == null ? null : _resolveProgressAnchor(block.text, restoreProgress);
+      final targetOffset = anchorOffset ?? restoreOffset;
+      scrollController.jumpTo(targetOffset.clamp(0, maxOffset.toInt()).toDouble());
     }
-  }
-
-  void _scheduleProgressSave() {
-    progressTimer?.cancel();
-    progressTimer = Timer(const Duration(milliseconds: 800), _saveProgress);
-  }
-
-  Future<void> _saveProgress() async {
-    final offset = scrollController.hasClients ? scrollController.offset.round() : 0;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('reader.${widget.bookId}.chapter', chapterIndex);
-    await prefs.setInt('reader.${widget.bookId}.offset', offset);
-    try {
-      await widget.api.saveProgress(widget.bookId, chapterIndex, offset);
-    } catch (_) {
-      // Local progress is still useful while offline or logged out.
-    }
+    unawaited(_appendNextChapter());
   }
 
   Future<void> _moveChapter(int delta) async {
@@ -579,78 +831,341 @@ class _ReaderScreenState extends State<ReaderScreen> {
     await _loadChapter(positions[next]);
   }
 
-  Future<void> _askAi(String question) async {
-    setState(() {
-      aiLoading = true;
-      aiAnswer = null;
-      aiStatus = null;
-      aiSources = [];
+  Future<void> _jumpToChapter(int index) async {
+    await _saveProgress();
+    await _loadChapter(index, restoreOffset: 0);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !scrollController.hasClients) return;
+      scrollController.jumpTo(0);
     });
-    try {
-      final result = await widget.api.askAi(
-        bookId: widget.bookId,
-        chapterIndex: chapterIndex,
-        question: question,
-        selectedText: selectedText,
-        selectedContext: chapter?.content ?? '',
-      );
-      setState(() {
-        aiAnswer = result.answer;
-        aiStatus = result.status;
-        aiSources = result.sources;
-      });
-    } catch (e) {
-      setState(() {
-        aiAnswer = e is UnauthorizedException ? '请先登录后再使用 AI 助读。' : e.toString();
-        aiStatus = 'error';
-      });
-    } finally {
-      if (mounted) setState(() => aiLoading = false);
+  }
+
+  double? _resolveProgressAnchor(String text, ReadingProgress progress) {
+    final anchor = progress.anchorText.trim();
+    if (anchor.isEmpty || !scrollController.hasClients) return null;
+    var textOffset = progress.anchorOffset;
+    if (textOffset == null || textOffset < 0 || textOffset + anchor.length > text.length || text.substring(textOffset, textOffset + anchor.length) != anchor) {
+      textOffset = resolveTextAnchor(text, anchor, progress.prefixText, progress.suffixText, progress.anchorOffset ?? progress.offset);
+    }
+    if (textOffset == null || text.isEmpty) return null;
+    final ratio = textOffset.clamp(0, text.length).toDouble() / text.length;
+    return scrollController.position.maxScrollExtent * ratio;
+  }
+
+  void _handleScroll() {
+    _scheduleProgressSave();
+    _maybeLoadAdjacentChapters();
+  }
+
+  void _maybeLoadAdjacentChapters() {
+    if (!scrollController.hasClients || chapters.isEmpty || loadedChapterBlocks.isEmpty) return;
+    final position = scrollController.position;
+    if (position.extentAfter < 520 && chapterIndex != loadedChapterBlocks.last.chapterIndex) {
+      setState(() => chapterIndex = loadedChapterBlocks.last.chapterIndex);
+    } else if (position.pixels < 520 && chapterIndex != loadedChapterBlocks.first.chapterIndex) {
+      setState(() => chapterIndex = loadedChapterBlocks.first.chapterIndex);
+    }
+    if (position.extentAfter < 900) {
+      unawaited(_appendNextChapter());
+    }
+    if (position.pixels < 260) {
+      unawaited(_prependPreviousChapter());
     }
   }
 
-  void _showAskSheet() {
-    final controller = TextEditingController(
-      text: selectedText.isEmpty ? '解释这一章的重点' : '解释这段文字',
+  Future<void> _appendNextChapter() async {
+    if (loadingNextChapter || chapters.isEmpty || loadedChapterBlocks.isEmpty) return;
+    final currentPositions = loadedChapterBlocks.map((block) => block.chapterIndex).toSet();
+    final lastIndex = loadedChapterBlocks.last.chapterIndex;
+    final positions = chapters.map((c) => c.chapterIndex).toList();
+    final current = positions.indexOf(lastIndex);
+    if (current < 0 || current + 1 >= positions.length) return;
+    final nextIndex = positions[current + 1];
+    if (currentPositions.contains(nextIndex)) return;
+    loadingNextChapter = true;
+    try {
+      final loaded = await widget.api.chapter(widget.bookId, nextIndex);
+      if (!mounted) return;
+      setState(() {
+        loadedChapterBlocks = [...loadedChapterBlocks, ReaderChapterBlock.fromContent(loaded)];
+        _rebuildReaderText();
+      });
+      await _loadAnnotationsForChapter(nextIndex);
+    } finally {
+      loadingNextChapter = false;
+    }
+  }
+
+  Future<void> _prependPreviousChapter() async {
+    if (loadingPreviousChapter || chapters.isEmpty || loadedChapterBlocks.isEmpty || !scrollController.hasClients) return;
+    final firstIndex = loadedChapterBlocks.first.chapterIndex;
+    final positions = chapters.map((c) => c.chapterIndex).toList();
+    final current = positions.indexOf(firstIndex);
+    if (current <= 0) return;
+    final previousIndex = positions[current - 1];
+    loadingPreviousChapter = true;
+    final oldMaxExtent = scrollController.position.maxScrollExtent;
+    final oldOffset = scrollController.offset;
+    try {
+      final loaded = await widget.api.chapter(widget.bookId, previousIndex);
+      if (!mounted) return;
+      setState(() {
+        loadedChapterBlocks = [ReaderChapterBlock.fromContent(loaded), ...loadedChapterBlocks];
+        _rebuildReaderText();
+      });
+      await _loadAnnotationsForChapter(previousIndex);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !scrollController.hasClients) return;
+        final insertedExtent = scrollController.position.maxScrollExtent - oldMaxExtent;
+        scrollController.jumpTo((oldOffset + insertedExtent).clamp(0, scrollController.position.maxScrollExtent).toDouble());
+      });
+    } finally {
+      loadingPreviousChapter = false;
+    }
+  }
+
+  void _rebuildReaderText() {
+    readerText = loadedChapterBlocks.map((block) => block.displayText).join('\n\n\n');
+  }
+
+  Future<void> _loadAnnotationsForChapter(int index) async {
+    if (!widget.api.isLoggedIn) {
+      if (mounted) setState(() => annotationsByChapter = {...annotationsByChapter, index: []});
+      return;
+    }
+    try {
+      final items = await widget.api.chapterAnnotations(widget.bookId, index);
+      if (!mounted) return;
+      setState(() => annotationsByChapter = {...annotationsByChapter, index: items});
+    } catch (_) {
+      if (mounted) setState(() => annotationsByChapter = {...annotationsByChapter, index: []});
+    }
+  }
+
+  Future<void> _refreshLoadedAnnotations({bool force = false}) async {
+    if (!widget.api.isLoggedIn || loadedChapterBlocks.isEmpty) return;
+    final now = DateTime.now();
+    if (!force && lastAnnotationsRefreshAt != null && now.difference(lastAnnotationsRefreshAt!) < const Duration(seconds: 8)) {
+      return;
+    }
+    lastAnnotationsRefreshAt = now;
+    final chapterIndexes = loadedChapterBlocks.map((block) => block.chapterIndex).toSet().toList();
+    try {
+      final entries = await Future.wait(chapterIndexes.map((index) async {
+        final items = await widget.api.chapterAnnotations(widget.bookId, index);
+        return MapEntry(index, items);
+      }));
+      if (!mounted) return;
+      setState(() {
+        annotationsByChapter = {
+          ...annotationsByChapter,
+          for (final entry in entries) entry.key: entry.value,
+        };
+      });
+    } catch (_) {}
+  }
+
+  void _toggleControls() {
+    final nextVisible = !controlsVisible;
+    setState(() => controlsVisible = nextVisible);
+    if (nextVisible) {
+      unawaited(_refreshLoadedAnnotations());
+    }
+  }
+
+  String _currentChapterTitle() {
+    for (final block in loadedChapterBlocks) {
+      if (block.chapterIndex == chapterIndex) return block.title;
+    }
+    for (final item in chapters) {
+      if (item.chapterIndex == chapterIndex) return item.title;
+    }
+    return chapter?.title ?? '';
+  }
+
+  List<TextSpan> _readerTextSpans(BuildContext context) {
+    final textColor = Theme.of(context).brightness == Brightness.dark ? const Color(0xFFE7DFD0) : ink;
+    final bodyStyle = TextStyle(
+      fontSize: fontSize,
+      height: lineHeight,
+      fontFamily: fontFamily == 'system' ? null : fontFamily,
+      letterSpacing: 0,
+      color: textColor,
     );
+    final titleStyle = bodyStyle.copyWith(
+      fontSize: fontSize + 5,
+      height: 1.45,
+      fontWeight: FontWeight.w800,
+    );
+    final spans = <TextSpan>[];
+    for (var i = 0; i < loadedChapterBlocks.length; i++) {
+      final block = loadedChapterBlocks[i];
+      if (i > 0) spans.add(TextSpan(text: '\n\n\n', style: bodyStyle));
+      if (block.title.trim().isNotEmpty) {
+        spans.add(TextSpan(text: block.title.trim(), style: titleStyle));
+        spans.add(TextSpan(text: '\n\n', style: bodyStyle));
+      }
+      spans.addAll(_annotatedBodySpans(block, bodyStyle));
+    }
+    return spans;
+  }
+
+  List<TextSpan> _annotatedBodySpans(ReaderChapterBlock block, TextStyle bodyStyle) {
+    final annotations = (annotationsByChapter[block.chapterIndex] ?? [])
+        .map((annotation) => _resolveAnnotationAnchor(annotation, block.text))
+        .whereType<ResolvedAnnotation>()
+        .toList()
+      ..sort((a, b) => a.startOffset.compareTo(b.startOffset));
+    if (annotations.isEmpty) return [TextSpan(text: block.text, style: bodyStyle)];
+    final spans = <TextSpan>[];
+    var cursor = 0;
+    for (final resolved in annotations) {
+      if (resolved.endOffset <= cursor) continue;
+      final start = resolved.startOffset.clamp(cursor, block.text.length).toInt();
+      final end = resolved.endOffset.clamp(start, block.text.length).toInt();
+      if (start > cursor) {
+        spans.add(TextSpan(text: block.text.substring(cursor, start), style: bodyStyle));
+      }
+      spans.add(TextSpan(
+        text: block.text.substring(start, end),
+        style: bodyStyle.merge(_annotationTextStyle(resolved.annotation)),
+        recognizer: TapGestureRecognizer()
+          ..onTap = () {
+            if (resolved.annotation.noteContent.isNotEmpty) {
+              _showThoughtSheet(resolved.annotation.selectedText, annotation: resolved.annotation);
+            } else {
+              _showAnnotationActionSheet(resolved.annotation);
+            }
+          },
+      ));
+      cursor = end;
+    }
+    if (cursor < block.text.length) {
+      spans.add(TextSpan(text: block.text.substring(cursor), style: bodyStyle));
+    }
+    return spans;
+  }
+
+  ResolvedAnnotation? _resolveAnnotationAnchor(ReadingAnnotation annotation, String text) {
+    final selected = annotation.selectedText.trim();
+    if (selected.isEmpty) return null;
+    final start = annotation.startOffset;
+    if (start >= 0 && start + selected.length <= text.length && text.substring(start, start + selected.length) == selected) {
+      return ResolvedAnnotation(annotation: annotation, startOffset: start, endOffset: start + selected.length);
+    }
+    var bestIndex = -1;
+    var bestScore = -1000000.0;
+    var from = 0;
+    while (from <= text.length) {
+      final index = text.indexOf(selected, from);
+      if (index < 0) break;
+      var score = -((index - start).abs() / 1000);
+      final prefix = annotation.prefixText;
+      if (prefix.isNotEmpty) {
+        final comparable = prefix.substring(prefix.length - prefix.length.clamp(0, index).toInt());
+        if (text.substring(index - comparable.length, index) == comparable) score += comparable.length;
+      }
+      final suffix = annotation.suffixText;
+      if (suffix.isNotEmpty) {
+        final comparableLength = suffix.length.clamp(0, text.length - index - selected.length).toInt();
+        final comparable = suffix.substring(0, comparableLength);
+        if (text.substring(index + selected.length, index + selected.length + comparable.length) == comparable) {
+          score += comparable.length;
+        }
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestIndex = index;
+      }
+      from = index + selected.length.clamp(1, selected.length).toInt();
+    }
+    if (bestIndex < 0) return null;
+    return ResolvedAnnotation(annotation: annotation, startOffset: bestIndex, endOffset: bestIndex + selected.length);
+  }
+
+  TextStyle _annotationTextStyle(ReadingAnnotation annotation) {
+    final color = switch (annotation.color) {
+      'green' => const Color(0xFF269766),
+      'blue' => const Color(0xFF267BCC),
+      'red' => const Color(0xFFC94242),
+      _ => const Color(0xFFE5BD20),
+    };
+    final background = switch (annotation.color) {
+      'green' => const Color(0x5C5DBE89),
+      'blue' => const Color(0x524F95EA),
+      'red' => const Color(0x4DE65C5C),
+      _ => const Color(0x66E5BD20),
+    };
+    if (annotation.noteContent.isNotEmpty) {
+      return const TextStyle(
+        decoration: TextDecoration.underline,
+        decorationColor: Color(0xFF8E8E8E),
+        decorationStyle: TextDecorationStyle.dashed,
+        decorationThickness: 1.7,
+      );
+    }
+    final base = annotation.markStyle == 'highlight' ? TextStyle(backgroundColor: background) : const TextStyle();
+    return base.copyWith(
+      decoration: annotation.markStyle == 'highlight' ? TextDecoration.none : TextDecoration.underline,
+      decorationColor: color,
+      decorationStyle: annotation.markStyle == 'wavy' ? TextDecorationStyle.wavy : TextDecorationStyle.solid,
+      decorationThickness: annotation.markStyle == 'wavy' ? 1.5 : 2,
+    );
+  }
+
+  void _showAnnotationActionSheet(ReadingAnnotation annotation) {
     showModalBottomSheet<void>(
       context: context,
-      isScrollControlled: true,
-      builder: (_) => Padding(
-        padding: EdgeInsets.only(
-          left: 20,
-          right: 20,
-          top: 20,
-          bottom: MediaQuery.of(context).viewInsets.bottom + 20,
-        ),
+      useSafeArea: true,
+      builder: (context) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('AI 助读', style: Theme.of(context).textTheme.titleLarge),
-            if (selectedText.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text(
-                selectedText,
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              maxLines: 3,
-              decoration: const InputDecoration(labelText: '问题'),
-            ),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: () {
-                Navigator.pop(context);
-                _askAi(controller.text.trim());
-              },
-              icon: const Icon(Icons.auto_awesome),
-              label: const Text('提问'),
+            Text('划线操作', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+            const SizedBox(height: 10),
+            Text(annotation.selectedText, maxLines: 4, overflow: TextOverflow.ellipsis, style: const TextStyle(color: mutedInk, height: 1.45)),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                TextButton.icon(
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: annotation.selectedText));
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已复制')));
+                  },
+                  icon: const Icon(Icons.copy),
+                  label: const Text('复制'),
+                ),
+                TextButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _showThoughtSheet(annotation.selectedText, annotation: annotation);
+                  },
+                  icon: const Icon(Icons.mode_comment_outlined),
+                  label: const Text('写想法'),
+                ),
+                TextButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    setState(() => selectedText = annotation.selectedText);
+                    _showAskSheet();
+                  },
+                  icon: const Icon(Icons.search),
+                  label: const Text('查询'),
+                ),
+                TextButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _deleteAnnotation(annotation);
+                  },
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('删除划线'),
+                ),
+              ],
             ),
           ],
         ),
@@ -658,109 +1173,640 @@ class _ReaderScreenState extends State<ReaderScreen> {
     );
   }
 
+  Future<void> _deleteAnnotation(ReadingAnnotation annotation) async {
+    try {
+      await widget.api.deleteAnnotation(annotation.id);
+      if (!mounted) return;
+      final next = (annotationsByChapter[annotation.chapterIndex] ?? [])
+          .where((item) => item.id != annotation.id)
+          .toList();
+      setState(() => annotationsByChapter = {...annotationsByChapter, annotation.chapterIndex: next});
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('划线已删除')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('删除失败：$e')));
+    }
+  }
+
+  SelectedAnchor? _findSelectedAnchor(String selected) {
+    final value = selected.trim();
+    if (value.isEmpty) return null;
+    final preferred = loadedChapterBlocks.where((block) => block.chapterIndex == chapterIndex).toList();
+    final candidates = [...preferred, ...loadedChapterBlocks.where((block) => block.chapterIndex != chapterIndex)];
+    for (final block in candidates) {
+      final start = block.text.indexOf(value);
+      if (start >= 0) {
+        return SelectedAnchor(
+          chapterIndex: block.chapterIndex,
+          selectedText: value,
+          startOffset: start,
+          endOffset: start + value.length,
+          prefixText: block.text.substring((start - 120).clamp(0, block.text.length).toInt(), start),
+          suffixText: block.text.substring((start + value.length).clamp(0, block.text.length).toInt(), (start + value.length + 120).clamp(0, block.text.length).toInt()),
+        );
+      }
+    }
+    return null;
+  }
+
+  SelectedAnchor? _anchorFromReaderSelection(int selectionStart, int selectionEnd) {
+    var cursor = 0;
+    for (var i = 0; i < loadedChapterBlocks.length; i++) {
+      final block = loadedChapterBlocks[i];
+      if (i > 0) cursor += 3;
+      final titlePrefixLength = block.title.trim().isEmpty ? 0 : block.title.trim().length + 2;
+      final blockStart = cursor;
+      final bodyStart = blockStart + titlePrefixLength;
+      final bodyEnd = bodyStart + block.text.length;
+      final blockEnd = blockStart + block.displayText.length;
+      if (selectionStart >= bodyStart && selectionEnd <= bodyEnd) {
+        final start = selectionStart - bodyStart;
+        final end = selectionEnd - bodyStart;
+        final selected = block.text.substring(start, end).trim();
+        if (selected.isEmpty) return null;
+        final leadingWhitespace = block.text.substring(start, end).length - block.text.substring(start, end).trimLeft().length;
+        final normalizedStart = start + leadingWhitespace;
+        return SelectedAnchor(
+          chapterIndex: block.chapterIndex,
+          selectedText: selected,
+          startOffset: normalizedStart,
+          endOffset: normalizedStart + selected.length,
+          prefixText: block.text.substring((normalizedStart - 120).clamp(0, block.text.length).toInt(), normalizedStart),
+          suffixText: block.text.substring(
+            (normalizedStart + selected.length).clamp(0, block.text.length).toInt(),
+            (normalizedStart + selected.length + 120).clamp(0, block.text.length).toInt(),
+          ),
+        );
+      }
+      if (selectionStart >= blockStart && selectionStart < blockEnd) return null;
+      cursor = blockEnd;
+    }
+    return null;
+  }
+
+  Future<void> _createAnnotation({String color = 'yellow', String markStyle = 'underline', String? noteContent}) async {
+    var anchor = selectedAnchor ?? _findSelectedAnchor(selectedText);
+    if (anchor == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('没有找到当前选中文字的位置')));
+      return;
+    }
+    if (!widget.api.isLoggedIn) {
+      final session = await widget.onLogin();
+      if (session == null) return;
+    }
+    try {
+      final created = await widget.api.createAnnotation(
+        bookId: widget.bookId,
+        chapterIndex: anchor.chapterIndex,
+        selectedText: anchor.selectedText,
+        startOffset: anchor.startOffset,
+        endOffset: anchor.endOffset,
+        prefixText: anchor.prefixText,
+        suffixText: anchor.suffixText,
+        color: color,
+        markStyle: markStyle,
+        noteContent: noteContent,
+      );
+      if (!mounted) return;
+      final next = [...(annotationsByChapter[anchor.chapterIndex] ?? <ReadingAnnotation>[]), created];
+      setState(() {
+        annotationsByChapter = {...annotationsByChapter, anchor.chapterIndex: next};
+        selectedText = '';
+        selectedAnchor = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(noteContent == null || noteContent.trim().isEmpty ? '划线已同步' : '想法已同步')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('保存失败：$e')));
+    }
+  }
+
+  void _showMarkStyleSheet() {
+    var markStyle = 'underline';
+    var color = 'yellow';
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('划线样式', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 10,
+                children: [
+                  ChoiceChip(
+                    label: const Text('色块'),
+                    selected: markStyle == 'highlight',
+                    onSelected: (_) => setSheetState(() => markStyle = 'highlight'),
+                  ),
+                  ChoiceChip(
+                    label: const Text('直线'),
+                    selected: markStyle == 'underline',
+                    onSelected: (_) => setSheetState(() => markStyle = 'underline'),
+                  ),
+                  ChoiceChip(
+                    label: const Text('波浪'),
+                    selected: markStyle == 'wavy',
+                    onSelected: (_) => setSheetState(() => markStyle = 'wavy'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 12,
+                children: [
+                  for (final item in const [
+                    ('yellow', Color(0xFFE5BD20)),
+                    ('green', Color(0xFF3CAF7B)),
+                    ('blue', Color(0xFF338BDC)),
+                    ('red', Color(0xFFD74B4B)),
+                  ])
+                    InkWell(
+                      borderRadius: BorderRadius.circular(99),
+                      onTap: () => setSheetState(() => color = item.$1),
+                      child: Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: item.$2,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: color == item.$1 ? ink : Colors.transparent, width: 3),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              FilledButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _createAnnotation(color: color, markStyle: markStyle);
+                },
+                child: const Text('保存划线'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _scheduleProgressSave() {
+    progressTimer?.cancel();
+    progressTimer = Timer(const Duration(milliseconds: 800), _saveProgress);
+  }
+
+  Future<void> _saveProgress() async {
+    final anchor = _currentProgressAnchor();
+    final offset = anchor?.offset ?? (scrollController.hasClients ? scrollController.offset.round() : 0);
+    final progressChapterIndex = anchor?.chapterIndex ?? chapterIndex;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('reader.${widget.bookId}.chapter', progressChapterIndex);
+    await prefs.setInt('reader.${widget.bookId}.offset', offset);
+    try {
+      await widget.api.saveProgress(
+        widget.bookId,
+        progressChapterIndex,
+        offset,
+        anchorText: anchor?.anchorText,
+        prefixText: anchor?.prefixText,
+        suffixText: anchor?.suffixText,
+        anchorOffset: anchor?.anchorOffset,
+      );
+    } catch (_) {}
+  }
+
+  ProgressAnchor? _currentProgressAnchor() {
+    if (!scrollController.hasClients || loadedChapterBlocks.isEmpty) return null;
+    final maxExtent = scrollController.position.maxScrollExtent;
+    final ratio = maxExtent <= 0 ? 0.0 : (scrollController.offset / maxExtent).clamp(0.0, 1.0);
+    final totalLength = loadedChapterBlocks.fold<int>(0, (sum, block) => sum + block.displayText.length + 3);
+    var estimatedGlobalOffset = (totalLength * ratio).round();
+    for (final block in loadedChapterBlocks) {
+      final titlePrefixLength = block.title.trim().isEmpty ? 0 : block.title.trim().length + 2;
+      final blockLength = block.displayText.length + 3;
+      if (estimatedGlobalOffset <= blockLength) {
+        final bodyOffset = (estimatedGlobalOffset - titlePrefixLength).clamp(0, block.text.length).toInt();
+        final anchorLength = (block.text.length - bodyOffset).clamp(0, 90).toInt();
+        final anchorText = anchorLength <= 0 ? '' : block.text.substring(bodyOffset, bodyOffset + anchorLength).trim();
+        return ProgressAnchor(
+          chapterIndex: block.chapterIndex,
+          offset: scrollController.offset.round(),
+          anchorText: anchorText,
+          prefixText: block.text.substring((bodyOffset - 120).clamp(0, block.text.length).toInt(), bodyOffset),
+          suffixText: block.text.substring((bodyOffset + anchorLength).clamp(0, block.text.length).toInt(), (bodyOffset + anchorLength + 120).clamp(0, block.text.length).toInt()),
+          anchorOffset: bodyOffset,
+        );
+      }
+      estimatedGlobalOffset -= blockLength;
+    }
+    final block = loadedChapterBlocks.last;
+    return ProgressAnchor(
+      chapterIndex: block.chapterIndex,
+      offset: scrollController.offset.round(),
+      anchorText: block.text.substring(0, block.text.length.clamp(0, 90).toInt()).trim(),
+      prefixText: '',
+      suffixText: block.text.substring(0, block.text.length.clamp(0, 120).toInt()),
+      anchorOffset: 0,
+    );
+  }
+
+  Future<void> _askAi(String question) async {
+    if (question.trim().isEmpty) return;
+    if (!widget.api.isLoggedIn) {
+      final session = await widget.onLogin();
+      if (session == null) return;
+    }
+    final selected = selectedText.trim();
+    messages.value = [
+      ...messages.value,
+      AiMessage(role: AiRole.user, text: selected.isEmpty ? question : '$question\n\n「$selected」'),
+      const AiMessage(role: AiRole.assistant, text: '正在思考...', loading: true),
+    ];
+    try {
+      final result = await widget.api.askAi(
+        bookId: widget.bookId,
+        chapterIndex: chapterIndex,
+        question: question,
+        selectedText: selected,
+        selectedContext: selected.isEmpty ? readerText : surroundingText(readerText, selected),
+      );
+      messages.value = [
+        ...messages.value.where((m) => !m.loading),
+        AiMessage(role: AiRole.assistant, text: stripRepeatedAiTitle(result.answer, question), status: result.status, sources: result.sources),
+      ];
+    } catch (e) {
+      messages.value = [
+        ...messages.value.where((m) => !m.loading),
+        AiMessage(role: AiRole.assistant, text: e.toString(), status: 'error'),
+      ];
+    }
+  }
+
+  void _showAskSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.82,
+        minChildSize: 0.48,
+        maxChildSize: 0.96,
+        builder: (context, controller) => AiHistoryPanel(
+          controller: controller,
+          messages: messages,
+          selectedText: selectedText.trim(),
+          initialQuestion: selectedText.trim().isEmpty ? '总结这一章的重点' : '解释这段文字',
+          onAsk: _askAi,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final content = chapter?.contentHtml?.isNotEmpty == true ? chapter!.contentHtml! : chapter?.content ?? '';
     return Scaffold(
-      appBar: AppBar(
-        title: Text(book?.title ?? '阅读'),
-        actions: [
-          IconButton(
-            tooltip: '目录',
-            icon: const Icon(Icons.list),
-            onPressed: chapters.isEmpty ? null : _openToc,
-          ),
-          IconButton(
-            tooltip: 'AI 助读',
-            icon: const Icon(Icons.auto_awesome),
-            onPressed: chapter == null ? null : _showAskSheet,
-          ),
-        ],
-      ),
+      backgroundColor: Theme.of(context).brightness == Brightness.dark ? paperDark : paper,
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : error != null
               ? ErrorBlock(message: error!, onRetry: _loadInitial)
-              : Column(
+              : Stack(
                   children: [
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                      child: Row(
-                        children: [
-                          Expanded(child: Text(chapter?.title ?? '', maxLines: 1, overflow: TextOverflow.ellipsis)),
-                          IconButton(
-                            tooltip: '上一章',
-                            icon: const Icon(Icons.chevron_left),
-                            onPressed: () => _moveChapter(-1),
-                          ),
-                          IconButton(
-                            tooltip: '下一章',
-                            icon: const Icon(Icons.chevron_right),
-                            onPressed: () => _moveChapter(1),
-                          ),
-                        ],
+                    Positioned.fill(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: _toggleControls,
                       ),
                     ),
-                    Slider(
-                      min: 15,
-                      max: 24,
-                      divisions: 9,
-                      value: fontSize,
-                      label: fontSize.round().toString(),
-                      onChanged: _setFontSize,
-                    ),
-                    Expanded(
+                    Positioned.fill(
                       child: ListView(
                         controller: scrollController,
-                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 120),
+                        padding: const EdgeInsets.fromLTRB(24, 28, 24, 132),
                         children: [
-                          SelectableText(
-                            content,
-                            style: TextStyle(fontSize: fontSize, height: 1.75),
+                          SelectableText.rich(
+                            TextSpan(children: _readerTextSpans(context)),
+                            contextMenuBuilder: _selectionMenu,
+                            onTap: _toggleControls,
                             onSelectionChanged: (selection, _) {
-                              if (!selection.isValid || selection.isCollapsed) return;
-                              final start = selection.start.clamp(0, content.length).toInt();
-                              final end = selection.end.clamp(0, content.length).toInt();
-                              setState(() => selectedText = content.substring(start, end));
+                              if (!selection.isValid || selection.isCollapsed) {
+                                if (selectedText.isNotEmpty || selectedAnchor != null) {
+                                  setState(() {
+                                    selectedText = '';
+                                    selectedAnchor = null;
+                                  });
+                                }
+                                return;
+                              }
+                              final start = selection.start.clamp(0, readerText.length).toInt();
+                              final end = selection.end.clamp(0, readerText.length).toInt();
+                              final value = readerText.substring(start, end).trim();
+                              setState(() {
+                                selectedText = value;
+                                selectedAnchor = _anchorFromReaderSelection(start, end) ?? _findSelectedAnchor(value);
+                              });
                             },
-                          ),
-                          const SizedBox(height: 24),
-                          AiAnswerBlock(
-                            loading: aiLoading,
-                            status: aiStatus,
-                            answer: aiAnswer,
-                            sources: aiSources,
                           ),
                         ],
                       ),
                     ),
+                    if (controlsVisible)
+                      Positioned(
+                        left: 14,
+                        right: 14,
+                        top: 12,
+                        child: ReaderToolbar(
+                          chapterTitle: _currentChapterTitle(),
+                          fontSize: fontSize,
+                          onDecreaseFontSize: () => _setFontSize((fontSize - 1).clamp(15, 28).toDouble()),
+                          onIncreaseFontSize: () => _setFontSize((fontSize + 1).clamp(15, 28).toDouble()),
+                          lineHeight: lineHeight,
+                          onDecreaseLineHeight: () => _setLineHeight((lineHeight - 0.1).clamp(1.35, 2.4).toDouble()),
+                          onIncreaseLineHeight: () => _setLineHeight((lineHeight + 0.1).clamp(1.35, 2.4).toDouble()),
+                          fontFamily: fontFamily,
+                          onToggleFontFamily: _toggleFontFamily,
+                          onBack: () => Navigator.pop(context),
+                          onPrev: () => _moveChapter(-1),
+                          onNext: () => _moveChapter(1),
+                          onToc: _openToc,
+                          onAi: _showAskSheet,
+                        ),
+                      ),
+                    if (selectedText.trim().isNotEmpty)
+                      Positioned(
+                        left: 16,
+                        right: 16,
+                        bottom: 16,
+                        child: SelectionActionBar(
+                          text: selectedText,
+                          onClear: () => setState(() {
+                            selectedText = '';
+                            selectedAnchor = null;
+                          }),
+                          onCopy: () {
+                            Clipboard.setData(ClipboardData(text: selectedText.trim()));
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已复制')));
+                          },
+                          onHighlight: _showMarkStyleSheet,
+                          onThought: () => _showThoughtSheet(selectedText.trim()),
+                          onAsk: _showAskSheet,
+                        ),
+                      ),
                   ],
                 ),
-      floatingActionButton: chapter == null
-          ? null
-          : FloatingActionButton.extended(
+      floatingActionButton: controlsVisible && selectedText.trim().isEmpty && chapter != null
+          ? FloatingActionButton.extended(
               onPressed: _showAskSheet,
               icon: const Icon(Icons.auto_awesome),
-              label: Text(selectedText.isEmpty ? '问本章' : '问选中内容'),
-            ),
+              label: const Text('问 AI'),
+            )
+          : null,
     );
+  }
+
+  Widget _selectionMenu(BuildContext context, EditableTextState editableTextState) {
+    final selected = selectedText.trim();
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: editableTextState.contextMenuAnchors,
+      buttonItems: [
+        ContextMenuButtonItem(
+          label: '复制',
+          onPressed: () {
+            Clipboard.setData(ClipboardData(text: selected));
+            editableTextState.hideToolbar();
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已复制')));
+          },
+        ),
+        ContextMenuButtonItem(
+          label: '划线',
+          onPressed: () {
+            editableTextState.hideToolbar();
+            _showMarkStyleSheet();
+          },
+        ),
+        ContextMenuButtonItem(
+          label: '写想法',
+          onPressed: () {
+            editableTextState.hideToolbar();
+            _showThoughtSheet(selected);
+          },
+        ),
+        ContextMenuButtonItem(
+          label: '查询',
+          onPressed: () {
+            editableTextState.hideToolbar();
+            _showAskSheet();
+          },
+        ),
+        ContextMenuButtonItem(
+          label: '听当前',
+          onPressed: () {
+            editableTextState.hideToolbar();
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('听书功能稍后接入')));
+          },
+        ),
+      ],
+    );
+  }
+
+  void _showThoughtSheet(String selected, {ReadingAnnotation? annotation}) {
+    final controller = TextEditingController(text: annotation?.noteContent ?? '');
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.58,
+        minChildSize: 0.38,
+        maxChildSize: 0.92,
+        builder: (context, sheetController) => Padding(
+          padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+          child: ListView(
+            controller: sheetController,
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 18),
+            children: [
+              Center(
+                child: Container(width: 42, height: 4, decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(99))),
+              ),
+              const SizedBox(height: 14),
+              Text(annotation == null ? '写想法' : '修改想法', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700)),
+              if (selected.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(selected, maxLines: 4, overflow: TextOverflow.ellipsis, style: const TextStyle(color: mutedInk)),
+              ],
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                minLines: 5,
+                maxLines: 10,
+                decoration: const InputDecoration(hintText: '记录这一刻的想法', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 14),
+              FilledButton(
+                onPressed: () async {
+                  final note = controller.text.trim();
+                  Navigator.pop(context);
+                  if (annotation == null) {
+                    await _createAnnotation(markStyle: 'underline', noteContent: note.isEmpty ? null : note);
+                  } else {
+                    await _updateAnnotationNote(annotation, note);
+                  }
+                },
+                child: const Text('保存'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _updateAnnotationNote(ReadingAnnotation annotation, String note) async {
+    try {
+      final updated = await widget.api.updateAnnotation(
+        annotation.id,
+        color: annotation.color,
+        markStyle: annotation.markStyle,
+        noteContent: note,
+      );
+      if (!mounted) return;
+      final next = (annotationsByChapter[annotation.chapterIndex] ?? [])
+          .map((item) => item.id == annotation.id ? updated : item)
+          .toList();
+      setState(() => annotationsByChapter = {...annotationsByChapter, annotation.chapterIndex: next});
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('想法已同步')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('保存失败：$e')));
+    }
   }
 
   void _openToc() {
     showModalBottomSheet<void>(
       context: context,
-      builder: (_) => SafeArea(
-        child: ListView(
+      useSafeArea: true,
+      builder: (_) => ListView(
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 18, 20, 8),
+            child: Text('目录', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+          ),
+          for (final item in chapters)
+            ListTile(
+              selected: item.chapterIndex == chapterIndex,
+              title: Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+              onTap: () {
+                Navigator.pop(context);
+                _jumpToChapter(item.chapterIndex);
+              },
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class ReaderToolbar extends StatelessWidget {
+  const ReaderToolbar({
+    super.key,
+    required this.chapterTitle,
+    required this.fontSize,
+    required this.onDecreaseFontSize,
+    required this.onIncreaseFontSize,
+    required this.lineHeight,
+    required this.onDecreaseLineHeight,
+    required this.onIncreaseLineHeight,
+    required this.fontFamily,
+    required this.onToggleFontFamily,
+    required this.onBack,
+    required this.onPrev,
+    required this.onNext,
+    required this.onToc,
+    required this.onAi,
+  });
+
+  final String chapterTitle;
+  final double fontSize;
+  final VoidCallback onDecreaseFontSize;
+  final VoidCallback onIncreaseFontSize;
+  final double lineHeight;
+  final VoidCallback onDecreaseLineHeight;
+  final VoidCallback onIncreaseLineHeight;
+  final String fontFamily;
+  final VoidCallback onToggleFontFamily;
+  final VoidCallback onBack;
+  final VoidCallback onPrev;
+  final VoidCallback onNext;
+  final VoidCallback onToc;
+  final VoidCallback onAi;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      elevation: 8,
+      color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.96),
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+        child: Column(
           children: [
-            for (final item in chapters)
-              ListTile(
-                selected: item.chapterIndex == chapterIndex,
-                title: Text(item.title),
-                onTap: () {
-                  Navigator.pop(context);
-                  _loadChapter(item.chapterIndex);
-                },
-              ),
+            Row(
+              children: [
+                IconButton(tooltip: '返回', icon: const Icon(Icons.arrow_back_ios_new), onPressed: onBack),
+                Expanded(child: Text(chapterTitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(color: mutedInk))),
+                IconButton(tooltip: '上一章', icon: const Icon(Icons.chevron_left), onPressed: onPrev),
+                IconButton(tooltip: '下一章', icon: const Icon(Icons.chevron_right), onPressed: onNext),
+                IconButton(tooltip: '目录', icon: const Icon(Icons.format_list_bulleted), onPressed: onToc),
+                IconButton(tooltip: 'AI 助读', icon: const Icon(Icons.auto_awesome), onPressed: onAi),
+              ],
+            ),
+            Row(
+              children: [
+                const Icon(Icons.text_fields, size: 18, color: mutedInk),
+                const SizedBox(width: 8),
+                const Text('字号', style: TextStyle(color: mutedInk)),
+                const Spacer(),
+                IconButton.filledTonal(tooltip: '减小字号', icon: const Icon(Icons.remove), onPressed: onDecreaseFontSize),
+                SizedBox(width: 54, child: Center(child: Text(fontSize.toStringAsFixed(0), style: const TextStyle(fontWeight: FontWeight.w700)))),
+                IconButton.filledTonal(tooltip: '增大字号', icon: const Icon(Icons.add), onPressed: onIncreaseFontSize),
+              ],
+            ),
+            Row(
+              children: [
+                const Icon(Icons.format_line_spacing, size: 18, color: mutedInk),
+                const SizedBox(width: 8),
+                const Text('行距', style: TextStyle(color: mutedInk)),
+                const Spacer(),
+                IconButton.filledTonal(tooltip: '减小行距', icon: const Icon(Icons.remove), onPressed: onDecreaseLineHeight),
+                SizedBox(width: 54, child: Center(child: Text(lineHeight.toStringAsFixed(1), style: const TextStyle(fontWeight: FontWeight.w700)))),
+                IconButton.filledTonal(tooltip: '增大行距', icon: const Icon(Icons.add), onPressed: onIncreaseLineHeight),
+              ],
+            ),
+            Row(
+              children: [
+                const Icon(Icons.font_download_outlined, size: 18, color: mutedInk),
+                const SizedBox(width: 8),
+                const Text('字体', style: TextStyle(color: mutedInk)),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: onToggleFontFamily,
+                      icon: const Icon(Icons.text_fields, size: 18),
+                      label: Text(fontFamily == 'LXGWWenKai' ? '霞鹜文楷' : '系统'),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -768,23 +1814,524 @@ class _ReaderScreenState extends State<ReaderScreen> {
   }
 }
 
-class BookTile extends StatelessWidget {
-  const BookTile({super.key, required this.book, required this.onTap, this.trailing});
+class SelectionActionBar extends StatelessWidget {
+  const SelectionActionBar({
+    super.key,
+    required this.text,
+    required this.onClear,
+    required this.onCopy,
+    required this.onHighlight,
+    required this.onThought,
+    required this.onAsk,
+  });
 
-  final BookSummary book;
-  final VoidCallback onTap;
-  final Widget? trailing;
+  final String text;
+  final VoidCallback onClear;
+  final VoidCallback onCopy;
+  final VoidCallback onHighlight;
+  final VoidCallback onThought;
+  final VoidCallback onAsk;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: ListTile(
-        onTap: onTap,
-        title: Text(book.title, maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: Text([book.author, book.status].where((e) => e.isNotEmpty).join(' · ')),
-        leading: const Icon(Icons.menu_book),
-        trailing: trailing,
+    return Material(
+      elevation: 8,
+      color: Theme.of(context).colorScheme.surface,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              '已选 ${text.trim().length} 字',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 260),
+              child: Text(
+                text.trim(),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: mutedInk, fontSize: 12, height: 1.3),
+              ),
+            ),
+            IconButton(tooltip: '取消选择', icon: const Icon(Icons.close), onPressed: onClear),
+            TextButton.icon(onPressed: onCopy, icon: const Icon(Icons.copy), label: const Text('复制')),
+            TextButton.icon(onPressed: onHighlight, icon: const Icon(Icons.border_color), label: const Text('划线')),
+            TextButton.icon(onPressed: onThought, icon: const Icon(Icons.mode_comment_outlined), label: const Text('写想法')),
+            FilledButton.icon(onPressed: onAsk, icon: const Icon(Icons.search), label: const Text('查询')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class AiHistoryPanel extends StatefulWidget {
+  const AiHistoryPanel({
+    super.key,
+    required this.controller,
+    required this.messages,
+    required this.selectedText,
+    required this.initialQuestion,
+    required this.onAsk,
+  });
+
+  final ScrollController controller;
+  final ValueNotifier<List<AiMessage>> messages;
+  final String selectedText;
+  final String initialQuestion;
+  final Future<void> Function(String question) onAsk;
+
+  @override
+  State<AiHistoryPanel> createState() => _AiHistoryPanelState();
+}
+
+class _AiHistoryPanelState extends State<AiHistoryPanel> {
+  final input = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    input.text = widget.initialQuestion;
+  }
+
+  @override
+  void dispose() {
+    input.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Column(
+        children: [
+          const SizedBox(height: 10),
+          Container(width: 42, height: 4, decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(99))),
+          const Padding(
+            padding: EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Icon(Icons.auto_awesome, color: wereadGreen),
+                SizedBox(width: 8),
+                Text('AI 助读', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+              ],
+            ),
+          ),
+          if (widget.selectedText.isNotEmpty)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: wereadGreen.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(widget.selectedText, maxLines: 5, overflow: TextOverflow.ellipsis),
+            ),
+          Expanded(
+            child: ValueListenableBuilder<List<AiMessage>>(
+              valueListenable: widget.messages,
+              builder: (context, messages, _) {
+                if (messages.isEmpty) {
+                  return const Center(child: Text('还没有提问记录'));
+                }
+                return ListView.builder(
+                  controller: widget.controller,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  itemCount: messages.length,
+                  itemBuilder: (_, index) => AiBubble(message: messages[index]),
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: input,
+                    minLines: 1,
+                    maxLines: 3,
+                    decoration: const InputDecoration(hintText: '继续追问', border: OutlineInputBorder()),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                IconButton.filled(
+                  onPressed: () async {
+                    final question = input.text.trim();
+                    input.clear();
+                    await widget.onAsk(question);
+                  },
+                  icon: const Icon(Icons.send),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class AiBubble extends StatelessWidget {
+  const AiBubble({super.key, required this.message});
+
+  final AiMessage message;
+
+  @override
+  Widget build(BuildContext context) {
+    final isUser = message.role == AiRole.user;
+    final color = isUser ? wereadGreen : Theme.of(context).colorScheme.surfaceContainerHighest;
+    final textColor = isUser ? Colors.white : Theme.of(context).colorScheme.onSurface;
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 320),
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(12)),
+        child: message.loading
+            ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (isUser)
+                    SelectableText(message.text, style: TextStyle(color: textColor, height: 1.45))
+                  else
+                    SimpleMarkdownText(text: message.text, color: textColor),
+                  if (message.sources.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Text('引用：${message.sources.take(3).join(' / ')}', style: TextStyle(color: textColor.withValues(alpha: 0.72), fontSize: 12)),
+                  ],
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+class SimpleMarkdownText extends StatelessWidget {
+  const SimpleMarkdownText({super.key, required this.text, required this.color});
+
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final lines = text.trim().split('\n');
+    final widgets = <Widget>[];
+    var index = 0;
+    while (index < lines.length) {
+      final line = lines[index].trimRight();
+      if (line.trim().isEmpty) {
+        widgets.add(const SizedBox(height: 8));
+        index++;
+        continue;
+      }
+      if (_isTableStart(lines, index)) {
+        final tableLines = <String>[line];
+        index += 2;
+        while (index < lines.length && lines[index].contains('|')) {
+          tableLines.add(lines[index].trimRight());
+          index++;
+        }
+        widgets.add(_MarkdownTable(lines: tableLines, color: color));
+        widgets.add(const SizedBox(height: 10));
+        continue;
+      }
+      final heading = RegExp(r'^(#{1,6})\s+(.+)$').firstMatch(line);
+      if (heading != null) {
+        final level = heading.group(1)!.length;
+        widgets.add(Padding(
+          padding: const EdgeInsets.only(top: 8, bottom: 6),
+          child: SelectableText.rich(
+            TextSpan(
+              children: _inlineSpans(heading.group(2)!, color, fontSize: 21 - level.toDouble()),
+              style: TextStyle(color: color, fontWeight: FontWeight.w800, height: 1.35, fontSize: 21 - level.toDouble()),
+            ),
+          ),
+        ));
+        index++;
+        continue;
+      }
+      final bullet = RegExp(r'^[-*+]\s+(.+)$').firstMatch(line.trimLeft());
+      if (bullet != null) {
+        widgets.add(_MarkdownLine(prefix: '•', text: bullet.group(1)!, color: color));
+        index++;
+        continue;
+      }
+      final numbered = RegExp(r'^\d+[.)]\s+(.+)$').firstMatch(line.trimLeft());
+      if (numbered != null) {
+        final marker = line.trimLeft().split(RegExp(r'\s+')).first;
+        widgets.add(_MarkdownLine(prefix: marker, text: numbered.group(1)!, color: color));
+        index++;
+        continue;
+      }
+      widgets.add(Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: SelectableText.rich(
+          TextSpan(
+            children: _inlineSpans(line, color),
+            style: TextStyle(color: color, height: 1.52, fontSize: 15.5),
+          ),
+        ),
+      ));
+      index++;
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: widgets);
+  }
+
+  bool _isTableStart(List<String> lines, int index) {
+    if (index + 1 >= lines.length) return false;
+    final header = lines[index];
+    final divider = lines[index + 1];
+    return header.contains('|') && RegExp(r'^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$').hasMatch(divider);
+  }
+}
+
+class _MarkdownLine extends StatelessWidget {
+  const _MarkdownLine({required this.prefix, required this.text, required this.color});
+
+  final String prefix;
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 26, child: Text(prefix, style: TextStyle(color: color, height: 1.45, fontWeight: FontWeight.w700))),
+          Expanded(
+            child: SelectableText.rich(
+              TextSpan(
+                children: _inlineSpans(text, color),
+                style: TextStyle(color: color, height: 1.45, fontSize: 15.5),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MarkdownTable extends StatelessWidget {
+  const _MarkdownTable({required this.lines, required this.color});
+
+  final List<String> lines;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = lines.map(_splitTableRow).where((row) => row.isNotEmpty).toList();
+    if (rows.isEmpty) return const SizedBox.shrink();
+    final columnCount = rows.map((row) => row.length).fold<int>(0, (max, length) => length > max ? length : max);
+    final normalizedRows = rows.map((row) => [...row, ...List.filled(columnCount - row.length, '')]).toList();
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Table(
+        defaultColumnWidth: const IntrinsicColumnWidth(),
+        border: TableBorder.all(color: color.withValues(alpha: 0.18)),
+        children: [
+          for (var rowIndex = 0; rowIndex < normalizedRows.length; rowIndex++)
+            TableRow(
+              decoration: BoxDecoration(color: rowIndex == 0 ? color.withValues(alpha: 0.08) : Colors.transparent),
+              children: [
+                for (final cell in normalizedRows[rowIndex])
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    child: SelectableText.rich(
+                      TextSpan(
+                        children: _inlineSpans(cell, color),
+                        style: TextStyle(color: color, fontSize: 14.5, height: 1.35, fontWeight: rowIndex == 0 ? FontWeight.w700 : FontWeight.w400),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  static List<String> _splitTableRow(String line) {
+    var value = line.trim();
+    if (value.startsWith('|')) value = value.substring(1);
+    if (value.endsWith('|')) value = value.substring(0, value.length - 1);
+    return value.split('|').map((cell) => cell.trim()).toList();
+  }
+}
+
+List<TextSpan> _inlineSpans(String text, Color color, {double fontSize = 15.5}) {
+  final spans = <TextSpan>[];
+  var remaining = text;
+  final pattern = RegExp(r'(\*\*[^*]+\*\*|`[^`]+`)');
+  while (remaining.isNotEmpty) {
+    final match = pattern.firstMatch(remaining);
+    if (match == null) {
+      spans.add(TextSpan(text: remaining));
+      break;
+    }
+    if (match.start > 0) spans.add(TextSpan(text: remaining.substring(0, match.start)));
+    final token = match.group(0)!;
+    if (token.startsWith('**')) {
+      spans.add(TextSpan(text: token.substring(2, token.length - 2), style: TextStyle(fontWeight: FontWeight.w800, fontSize: fontSize)));
+    } else {
+      spans.add(TextSpan(
+        text: token.substring(1, token.length - 1),
+        style: TextStyle(
+          fontFamily: 'monospace',
+          fontSize: fontSize - 1,
+          backgroundColor: color.withValues(alpha: 0.08),
+        ),
+      ));
+    }
+    remaining = remaining.substring(match.end);
+  }
+  return spans;
+}
+
+class BookGrid extends StatelessWidget {
+  const BookGrid({
+    super.key,
+    required this.books,
+    required this.onTap,
+    this.trailingBuilder,
+  });
+
+  final List<BookSummary> books;
+  final Future<void> Function(BookSummary book) onTap;
+  final Widget Function(BookSummary book)? trailingBuilder;
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: books.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        childAspectRatio: 0.55,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 14,
+      ),
+      itemBuilder: (_, index) {
+        final book = books[index];
+        return InkWell(
+          onTap: () => onTap(book),
+          borderRadius: BorderRadius.circular(8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Stack(
+                  children: [
+                    BookCover(book: book),
+                    if (trailingBuilder != null)
+                      Positioned(right: 0, bottom: 0, child: trailingBuilder!(book)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 7),
+              Text(book.title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600)),
+              Text(book.author.isEmpty ? book.status : book.author, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: mutedInk)),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class BookCover extends StatelessWidget {
+  const BookCover({super.key, required this.book});
+
+  final BookSummary book;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = absoluteAssetUrl(book.coverUrl);
+    final fallback = Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFEEE6D6), Color(0xFFD8CCB8)],
+        ),
+        borderRadius: BorderRadius.circular(7),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.10), blurRadius: 10, offset: const Offset(0, 5)),
+        ],
+      ),
+      padding: const EdgeInsets.all(10),
+      child: Align(
+        alignment: Alignment.topLeft,
+        child: Text(
+          book.title,
+          maxLines: 5,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: ink, fontWeight: FontWeight.w700, height: 1.2),
+        ),
+      ),
+    );
+    if (url.isEmpty) return fallback;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(7),
+      child: Image.network(
+        url,
+        width: double.infinity,
+        fit: BoxFit.cover,
+        headers: const {'Accept': 'image/*,*/*'},
+        loadingBuilder: (context, child, loadingProgress) => loadingProgress == null ? child : fallback,
+        errorBuilder: (_, __, ___) => fallback,
+      ),
+    );
+  }
+}
+
+class EmptyBlock extends StatelessWidget {
+  const EmptyBlock({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.message,
+    this.actionText,
+    this.onAction,
+  });
+
+  final IconData icon;
+  final String title;
+  final String message;
+  final String? actionText;
+  final VoidCallback? onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 72),
+      child: Column(
+        children: [
+          Icon(icon, size: 48, color: mutedInk),
+          const SizedBox(height: 12),
+          Text(title, style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 6),
+          Text(message, textAlign: TextAlign.center, style: const TextStyle(color: mutedInk)),
+          if (actionText != null && onAction != null) ...[
+            const SizedBox(height: 14),
+            OutlinedButton(onPressed: onAction, child: Text(actionText!)),
+          ],
+        ],
       ),
     );
   }
@@ -804,59 +2351,8 @@ class ErrorBlock extends StatelessWidget {
         children: [
           Text(message, textAlign: TextAlign.center),
           const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(Icons.refresh),
-            label: const Text('重试'),
-          ),
+          OutlinedButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh), label: const Text('重试')),
         ],
-      ),
-    );
-  }
-}
-
-class AiAnswerBlock extends StatelessWidget {
-  const AiAnswerBlock({
-    super.key,
-    required this.loading,
-    required this.status,
-    required this.answer,
-    required this.sources,
-  });
-
-  final bool loading;
-  final String? status;
-  final String? answer;
-  final List<String> sources;
-
-  @override
-  Widget build(BuildContext context) {
-    if (loading) {
-      return const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()));
-    }
-    if (answer == null) return const SizedBox.shrink();
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.auto_awesome),
-                const SizedBox(width: 8),
-                Text(status == null ? 'AI 回答' : 'AI 回答 · $status'),
-              ],
-            ),
-            const SizedBox(height: 12),
-            SelectableText(answer!),
-            if (sources.isNotEmpty) ...[
-              const Divider(height: 28),
-              Text('引用来源', style: Theme.of(context).textTheme.titleSmall),
-              for (final source in sources) Text('• $source'),
-            ],
-          ],
-        ),
       ),
     );
   }
@@ -869,6 +2365,8 @@ class ApiClient {
   final Future<void> Function() onUnauthorized;
   final storage = const FlutterSecureStorage();
   AuthSession? session;
+
+  bool get isLoggedIn => session?.token.isNotEmpty == true;
 
   Future<AuthSession?> restoreSession() async {
     final token = await storage.read(key: 'auth.token');
@@ -900,8 +2398,8 @@ class ApiClient {
     await storage.delete(key: 'auth.username');
   }
 
-  Future<List<BookSummary>> mobileBooks({String? keyword}) async {
-    final query = <String, String>{'pageSize': '30'};
+  Future<List<BookSummary>> mobileBooks({String? keyword, int pageSize = 12}) async {
+    final query = <String, String>{'pageSize': '$pageSize'};
     if (keyword != null && keyword.isNotEmpty) query['keyString'] = keyword;
     final data = await get('/api/mobile/books', query: query);
     final content = (data as Map<String, dynamic>)['content'] as List<dynamic>? ?? [];
@@ -915,9 +2413,7 @@ class ApiClient {
 
   Future<List<ChapterSummary>> chapters(int bookId) async {
     final data = await get('/api/mobile/books/$bookId/chapters');
-    return (data as List<dynamic>)
-        .map((item) => ChapterSummary.fromJson(item as Map<String, dynamic>))
-        .toList();
+    return (data as List<dynamic>).map((item) => ChapterSummary.fromJson(item as Map<String, dynamic>)).toList();
   }
 
   Future<ChapterContent> chapter(int bookId, int chapterIndex) async {
@@ -927,9 +2423,11 @@ class ApiClient {
 
   Future<List<BookSummary>> bookshelf() async {
     final data = await get('/api/user/bookshelf');
-    return (data as List<dynamic>)
-        .map((item) => BookSummary.fromJson((item as Map<String, dynamic>)['book'] as Map<String, dynamic>))
-        .toList();
+    return (data as List<dynamic>).map((item) {
+      final raw = item as Map<String, dynamic>;
+      final bookJson = raw['book'];
+      return BookSummary.fromJson(bookJson is Map<String, dynamic> ? bookJson : raw);
+    }).toList();
   }
 
   Future<void> addToBookshelf(int bookId) async {
@@ -941,11 +2439,71 @@ class ApiClient {
     return ReadingProgress.fromJson(data as Map<String, dynamic>);
   }
 
-  Future<void> saveProgress(int bookId, int chapterIndex, int offset) async {
+  Future<void> saveProgress(
+    int bookId,
+    int chapterIndex,
+    int offset, {
+    String? anchorText,
+    String? prefixText,
+    String? suffixText,
+    int? anchorOffset,
+  }) async {
     await post('/api/user/books/$bookId/progress', body: {
       'chapterIndex': chapterIndex,
       'offset': offset,
+      'anchorText': anchorText,
+      'prefixText': prefixText,
+      'suffixText': suffixText,
+      'anchorOffset': anchorOffset,
     });
+  }
+
+  Future<List<ReadingAnnotation>> chapterAnnotations(int bookId, int chapterIndex) async {
+    final data = await get('/api/user/books/$bookId/chapters/$chapterIndex/annotations');
+    return (data as List<dynamic>).map((item) => ReadingAnnotation.fromJson(item as Map<String, dynamic>)).toList();
+  }
+
+  Future<ReadingAnnotation> createAnnotation({
+    required int bookId,
+    required int chapterIndex,
+    required String selectedText,
+    required int startOffset,
+    required int endOffset,
+    required String prefixText,
+    required String suffixText,
+    required String color,
+    required String markStyle,
+    String? noteContent,
+  }) async {
+    final data = await post('/api/user/books/$bookId/chapters/$chapterIndex/annotations', body: {
+      'selectedText': selectedText,
+      'startOffset': startOffset,
+      'endOffset': endOffset,
+      'prefixText': prefixText,
+      'suffixText': suffixText,
+      'color': color,
+      'markStyle': markStyle,
+      'noteContent': noteContent,
+    });
+    return ReadingAnnotation.fromJson(data as Map<String, dynamic>);
+  }
+
+  Future<ReadingAnnotation> updateAnnotation(
+    int annotationId, {
+    String? color,
+    String? markStyle,
+    String? noteContent,
+  }) async {
+    final data = await put('/api/user/annotations/$annotationId', body: {
+      'color': color,
+      'markStyle': markStyle,
+      'noteContent': noteContent,
+    });
+    return ReadingAnnotation.fromJson(data as Map<String, dynamic>);
+  }
+
+  Future<void> deleteAnnotation(int annotationId) async {
+    await delete('/api/user/annotations/$annotationId');
   }
 
   Future<AiResult> askAi({
@@ -955,27 +2513,37 @@ class ApiClient {
     required String selectedText,
     required String selectedContext,
   }) async {
+    final context = selectedContext.length > 4000 ? selectedContext.substring(0, 4000) : selectedContext;
     final data = await post('/api/ai/chat', body: {
       'bookId': bookId,
       'chapterIndex': chapterIndex,
       'question': question,
       'selectedText': selectedText,
-      'selectedContext': selectedContext.length > 4000 ? selectedContext.substring(0, 4000) : selectedContext,
-    }, timeout: const Duration(seconds: 60));
+      'selectedContext': context,
+    }, timeout: const Duration(seconds: 75));
     return AiResult.fromJson(data as Map<String, dynamic>);
   }
 
   Future<dynamic> get(String path, {Map<String, String>? query}) {
-    final uri = _uri(path, query);
-    return _send(() => http.get(uri, headers: _headers()));
+    return _send(() => http.get(_uri(path, query), headers: _headers()));
   }
 
   Future<dynamic> post(String path, {Object? body, Duration timeout = const Duration(seconds: 20)}) {
-    final uri = _uri(path);
     return _send(
-      () => http.post(uri, headers: _headers(jsonBody: body != null), body: body == null ? null : jsonEncode(body)),
+      () => http.post(_uri(path), headers: _headers(jsonBody: body != null), body: body == null ? null : jsonEncode(body)),
       timeout: timeout,
     );
+  }
+
+  Future<dynamic> put(String path, {Object? body, Duration timeout = const Duration(seconds: 20)}) {
+    return _send(
+      () => http.put(_uri(path), headers: _headers(jsonBody: body != null), body: body == null ? null : jsonEncode(body)),
+      timeout: timeout,
+    );
+  }
+
+  Future<dynamic> delete(String path, {Duration timeout = const Duration(seconds: 20)}) {
+    return _send(() => http.delete(_uri(path), headers: _headers()), timeout: timeout);
   }
 
   Uri _uri(String path, [Map<String, String>? query]) {
@@ -1003,7 +2571,12 @@ class ApiClient {
     } catch (e) {
       throw AppException('网络不可用：$e');
     }
-    final body = response.body.isEmpty ? null : jsonDecode(utf8.decode(response.bodyBytes));
+    dynamic body;
+    try {
+      body = response.body.isEmpty ? null : jsonDecode(utf8.decode(response.bodyBytes));
+    } catch (_) {
+      body = response.body;
+    }
     if (response.statusCode == 401) {
       await onUnauthorized();
       throw UnauthorizedException();
@@ -1059,7 +2632,7 @@ class BookSummary {
       title: json['title']?.toString() ?? '未命名',
       author: json['author']?.toString() ?? '',
       status: json['status']?.toString() ?? '',
-      coverUrl: json['coverUrl']?.toString() ?? '',
+      coverUrl: firstString(json, const ['coverUrl', 'cover_url', 'cover', 'imageUrl', 'image', 'thumbnailUrl']),
     );
   }
 }
@@ -1102,25 +2675,83 @@ class ChapterContent {
 }
 
 class ReadingProgress {
-  const ReadingProgress({required this.chapterIndex, required this.offset});
+  const ReadingProgress({
+    required this.chapterIndex,
+    required this.offset,
+    required this.anchorText,
+    required this.prefixText,
+    required this.suffixText,
+    required this.anchorOffset,
+  });
 
   final int chapterIndex;
   final int offset;
+  final String anchorText;
+  final String prefixText;
+  final String suffixText;
+  final int? anchorOffset;
 
   factory ReadingProgress.fromJson(Map<String, dynamic> json) {
     return ReadingProgress(
       chapterIndex: (json['chapterIndex'] as num?)?.toInt() ?? 1,
       offset: (json['offset'] as num?)?.toInt() ?? 0,
+      anchorText: json['anchorText']?.toString() ?? '',
+      prefixText: json['prefixText']?.toString() ?? '',
+      suffixText: json['suffixText']?.toString() ?? '',
+      anchorOffset: (json['anchorOffset'] as num?)?.toInt(),
+    );
+  }
+}
+
+class ReadingAnnotation {
+  const ReadingAnnotation({
+    required this.id,
+    required this.bookId,
+    required this.chapterIndex,
+    required this.chapterTitle,
+    required this.selectedText,
+    required this.startOffset,
+    required this.endOffset,
+    required this.prefixText,
+    required this.suffixText,
+    required this.color,
+    required this.markStyle,
+    required this.noteContent,
+  });
+
+  final int id;
+  final int bookId;
+  final int chapterIndex;
+  final String chapterTitle;
+  final String selectedText;
+  final int startOffset;
+  final int endOffset;
+  final String prefixText;
+  final String suffixText;
+  final String color;
+  final String markStyle;
+  final String noteContent;
+
+  factory ReadingAnnotation.fromJson(Map<String, dynamic> json) {
+    return ReadingAnnotation(
+      id: (json['id'] as num?)?.toInt() ?? 0,
+      bookId: (json['bookId'] as num?)?.toInt() ?? 0,
+      chapterIndex: (json['chapterIndex'] as num?)?.toInt() ?? 1,
+      chapterTitle: json['chapterTitle']?.toString() ?? '',
+      selectedText: json['selectedText']?.toString() ?? '',
+      startOffset: (json['startOffset'] as num?)?.toInt() ?? 0,
+      endOffset: (json['endOffset'] as num?)?.toInt() ?? 0,
+      prefixText: json['prefixText']?.toString() ?? '',
+      suffixText: json['suffixText']?.toString() ?? '',
+      color: json['color']?.toString() ?? 'yellow',
+      markStyle: json['markStyle']?.toString() ?? 'highlight',
+      noteContent: json['noteContent']?.toString() ?? '',
     );
   }
 }
 
 class AiResult {
-  const AiResult({
-    required this.answer,
-    required this.status,
-    required this.sources,
-  });
+  const AiResult({required this.answer, required this.status, required this.sources});
 
   final String answer;
   final String status;
@@ -1128,11 +2759,29 @@ class AiResult {
 
   factory AiResult.fromJson(Map<String, dynamic> json) {
     return AiResult(
-      answer: json['answer']?.toString() ?? '',
+      answer: cleanAiText(json['answer']?.toString() ?? ''),
       status: json['status']?.toString() ?? 'completed',
       sources: (json['sources'] as List<dynamic>? ?? []).map((item) => item.toString()).toList(),
     );
   }
+}
+
+enum AiRole { user, assistant }
+
+class AiMessage {
+  const AiMessage({
+    required this.role,
+    required this.text,
+    this.loading = false,
+    this.status,
+    this.sources = const [],
+  });
+
+  final AiRole role;
+  final String text;
+  final bool loading;
+  final String? status;
+  final List<String> sources;
 }
 
 class AppException implements Exception {
@@ -1146,4 +2795,140 @@ class AppException implements Exception {
 
 class UnauthorizedException extends AppException {
   UnauthorizedException() : super('未登录或登录已过期');
+}
+
+String normalizeReaderText(String source) {
+  if (source.trim().isEmpty) return '';
+  var text = source;
+  text = text.replaceAll(RegExp(r'<(script|style)[\s\S]*?</\1>', caseSensitive: false), '');
+  text = text.replaceAll(RegExp(r'</(p|div|section|article|h[1-6]|li|tr)>', caseSensitive: false), '\n');
+  text = text.replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n');
+  text = text.replaceAll(RegExp(r'<[^>]+>'), '');
+  text = decodeHtmlEntities(text);
+  text = text.replaceAll('\r', '\n');
+  text = text.replaceAll(RegExp(r'[ \t]+'), ' ');
+  text = text.replaceAll(RegExp(r'\n{3,}'), '\n\n');
+  return text.trim();
+}
+
+String stripLeadingTitle(String text, String title) {
+  final normalizedTitle = title.trim();
+  if (normalizedTitle.isEmpty) return text;
+  var value = text.trimLeft();
+  if (value == normalizedTitle) return '';
+  if (value.startsWith(normalizedTitle)) {
+    final rest = value.substring(normalizedTitle.length);
+    if (rest.isEmpty || rest.startsWith('\n') || rest.startsWith(' ') || rest.startsWith('\t')) {
+      return rest.trimLeft();
+    }
+  }
+  final firstLineEnd = value.indexOf('\n');
+  if (firstLineEnd > 0 && value.substring(0, firstLineEnd).trim() == normalizedTitle) {
+    return value.substring(firstLineEnd + 1).trimLeft();
+  }
+  return text;
+}
+
+String cleanAiText(String source) {
+  var text = source.trim();
+  text = text.replaceAll(RegExp(r'\n{3,}'), '\n\n');
+  return text.trim();
+}
+
+String absoluteAssetUrl(String source) {
+  final value = source.trim();
+  if (value.isEmpty) return '';
+  final parsed = Uri.tryParse(value);
+  if (parsed != null && parsed.hasScheme) return value;
+  final base = Uri.parse(apiBaseUrl);
+  if (value.startsWith('//')) {
+    return '${base.scheme}:$value';
+  }
+  if (value.startsWith('/')) {
+    return base.resolve(value).toString();
+  }
+  return base.resolve('/$value').toString();
+}
+
+String firstString(Map<String, dynamic> json, List<String> keys) {
+  for (final key in keys) {
+    final value = json[key];
+    if (value != null && value.toString().trim().isNotEmpty) {
+      return value.toString();
+    }
+  }
+  return '';
+}
+
+int? resolveTextAnchor(String text, String anchorText, String prefixText, String suffixText, int preferredOffset) {
+  final anchor = anchorText.trim();
+  if (anchor.isEmpty) return null;
+  if (preferredOffset >= 0 && preferredOffset + anchor.length <= text.length && text.substring(preferredOffset, preferredOffset + anchor.length) == anchor) {
+    return preferredOffset;
+  }
+  var bestIndex = -1;
+  var bestScore = -1000000.0;
+  var from = 0;
+  while (from <= text.length) {
+    final index = text.indexOf(anchor, from);
+    if (index < 0) break;
+    var score = -((index - preferredOffset).abs() / 1000);
+    if (prefixText.isNotEmpty) {
+      final length = prefixText.length.clamp(0, index).toInt();
+      final comparable = prefixText.substring(prefixText.length - length);
+      if (text.substring(index - comparable.length, index) == comparable) score += comparable.length;
+    }
+    if (suffixText.isNotEmpty) {
+      final length = suffixText.length.clamp(0, text.length - index - anchor.length).toInt();
+      final comparable = suffixText.substring(0, length);
+      if (text.substring(index + anchor.length, index + anchor.length + comparable.length) == comparable) score += comparable.length;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = index;
+    }
+    from = index + anchor.length.clamp(1, anchor.length).toInt();
+  }
+  return bestIndex < 0 ? null : bestIndex;
+}
+
+String stripRepeatedAiTitle(String answer, String question) {
+  final expected = question.trim();
+  if (expected.isEmpty) return answer;
+  final lines = answer.split('\n');
+  var firstContentIndex = -1;
+  for (var i = 0; i < lines.length; i++) {
+    if (lines[i].trim().isNotEmpty) {
+      firstContentIndex = i;
+      break;
+    }
+  }
+  if (firstContentIndex < 0) return answer;
+  final firstLine = lines[firstContentIndex].trim().replaceFirst(RegExp(r'^#{1,6}\s*'), '').replaceAll(RegExp(r'\*+'), '').trim();
+  if (firstLine != expected) return answer;
+  lines.removeAt(firstContentIndex);
+  return lines.join('\n').trimLeft();
+}
+
+String decodeHtmlEntities(String value) {
+  return value
+      .replaceAll('&nbsp;', ' ')
+      .replaceAll('&amp;', '&')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&quot;', '"')
+      .replaceAll('&#39;', "'")
+      .replaceAll('&ldquo;', '“')
+      .replaceAll('&rdquo;', '”')
+      .replaceAll('&lsquo;', '‘')
+      .replaceAll('&rsquo;', '’');
+}
+
+String surroundingText(String fullText, String selected) {
+  if (selected.isEmpty) return fullText;
+  final index = fullText.indexOf(selected);
+  if (index < 0) return selected;
+  final start = (index - 800).clamp(0, fullText.length).toInt();
+  final end = (index + selected.length + 800).clamp(0, fullText.length).toInt();
+  return fullText.substring(start, end);
 }

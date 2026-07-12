@@ -83,16 +83,28 @@ public class ReadingService {
     }
 
     @Transactional
-    public Reading updateProgress(Long bookId, Long userId, Integer index, Integer offset){
+    public Reading updateProgress(Long bookId, Long userId, Integer index, Integer offset,
+                                  String anchorText, String prefixText, String suffixText, Integer anchorOffset){
         Reading reading = readingRepository.findByBookIdAndUserId(bookId, userId).orElseGet(Reading::new);
         reading.setBookId(bookId);
         reading.setUserId(userId);
         reading.setChapterIndex(index);
         reading.setOffset(offset);
+        reading.setAnchorText(trimToNull(anchorText, 500));
+        reading.setPrefixText(trimToNull(prefixText, 300));
+        reading.setSuffixText(trimToNull(suffixText, 300));
+        reading.setAnchorOffset(anchorOffset);
         reading.setUpdatedAt(LocalDateTime.now());
         reading = readingRepository.save(reading);
         redisTemplate.delete("progress:userId:" + userId + ":bookId:" + bookId);
         return reading;
+    }
+
+    private String trimToNull(String value, int maxLength) {
+        if (value == null) return null;
+        String trimmed = value.trim();
+        if (trimmed.isEmpty()) return null;
+        return trimmed.length() > maxLength ? trimmed.substring(0, maxLength) : trimmed;
     }
 
 }
