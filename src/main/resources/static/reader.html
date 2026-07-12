@@ -4473,6 +4473,11 @@ document.getElementById('chapterContent').addEventListener('click', function(e) 
     if (isMobileReader && !pendingAnnotationAnchor && !window.getSelection().toString().trim()) {
       const toolbar = document.querySelector('.reader-style-toolbar');
       if (toolbar) {
+        if (toolbar.classList.contains('mobile-visible')) {
+          toolbar.classList.remove('mobile-visible');
+          window.clearTimeout(toolbar._mobileHideTimer);
+          return;
+        }
         toolbar.classList.add('mobile-visible');
         window.clearTimeout(toolbar._mobileHideTimer);
         toolbar._mobileHideTimer = window.setTimeout(() => toolbar.classList.remove('mobile-visible'), 4200);
@@ -4588,7 +4593,9 @@ document.addEventListener('keydown', function(e) {
 });
 document.addEventListener('mousedown', function(e) {
   const toolbar = document.getElementById('annotationToolbar');
-  if (!toolbar.contains(e.target) && !document.getElementById('chapterContent').contains(e.target)) {
+  const existingToolbar = document.getElementById('existingAnnotationToolbar');
+  const inToolbar = toolbar.contains(e.target) || existingToolbar.contains(e.target);
+  if (!inToolbar && !document.getElementById('chapterContent').contains(e.target)) {
     hideAnnotationToolbar();
   }
 });
