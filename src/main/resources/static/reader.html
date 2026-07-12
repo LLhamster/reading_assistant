@@ -7,6 +7,9 @@
   <script>
     try {
       document.documentElement.dataset.theme = localStorage.getItem('readerTheme') || 'day';
+      if (new URLSearchParams(location.search).get('mobile') === '1') {
+        document.documentElement.classList.add('mobile-reader');
+      }
     } catch (_) {
       document.documentElement.dataset.theme = 'day';
     }
@@ -1840,6 +1843,209 @@
       .page { padding: 20px 16px calc(var(--nav-height) + 16px); }
       .profile-style-toggles { grid-template-columns: 1fr; }
     }
+
+    html.mobile-reader,
+    html.mobile-reader body {
+      width: 100%;
+      min-height: 100%;
+      overflow-x: hidden;
+      background: var(--bg-primary);
+    }
+
+    html.mobile-reader .nav,
+    html.mobile-reader .books-header,
+    html.mobile-reader .books-sidebar,
+    html.mobile-reader #page-jobs,
+    html.mobile-reader #page-news,
+    html.mobile-reader .reader-subtitle,
+    html.mobile-reader #topPrevChapterBtn,
+    html.mobile-reader #topNextChapterBtn,
+    html.mobile-reader .reader-bottom-nav,
+    html.mobile-reader .ai-subtitle,
+    html.mobile-reader .ai-session,
+    html.mobile-reader .ai-profile-actions {
+      display: none !important;
+    }
+
+    html.mobile-reader .page {
+      display: block;
+      padding: env(safe-area-inset-top) 0 0;
+      min-height: 100vh;
+    }
+
+    html.mobile-reader .books-layout {
+      display: block;
+      width: 100%;
+      max-width: none;
+      margin: 0;
+    }
+
+    html.mobile-reader .reader-area {
+      min-height: 100vh;
+      padding: 20px 20px 132px;
+      border: 0;
+      border-radius: 0;
+      background: var(--bg-primary);
+    }
+
+    html.mobile-reader .reader-title {
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      margin: -20px -20px 10px;
+      padding: calc(env(safe-area-inset-top) + 12px) 18px 10px;
+      background: color-mix(in srgb, var(--bg-primary) 92%, transparent);
+      backdrop-filter: blur(14px);
+      font-family: inherit;
+      font-size: 17px;
+      line-height: 1.35;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      border-bottom: 1px solid rgba(0,0,0,0.04);
+    }
+
+    html.mobile-reader .reader-nav {
+      position: sticky;
+      top: 48px;
+      z-index: 35;
+      margin: 0 -20px 18px;
+      padding: 8px 14px;
+      background: color-mix(in srgb, var(--bg-primary) 94%, transparent);
+      backdrop-filter: blur(14px);
+      border-bottom: 1px solid rgba(0,0,0,0.04);
+    }
+
+    html.mobile-reader .reader-nav select {
+      width: 100%;
+      min-width: 0;
+      height: 40px;
+      border-radius: 10px;
+      font-size: 14px;
+    }
+
+    html.mobile-reader .reader-nav button {
+      height: 40px;
+      border-radius: 10px;
+      font-size: 14px;
+    }
+
+    html.mobile-reader .reader-style-toolbar {
+      position: fixed;
+      left: 10px;
+      right: 10px;
+      bottom: calc(env(safe-area-inset-bottom) + 10px);
+      z-index: 70;
+      margin: 0;
+      padding: 10px;
+      border: 1px solid var(--floating-border);
+      border-radius: 18px;
+      background: color-mix(in srgb, var(--floating-bg) 94%, transparent);
+      box-shadow: 0 14px 42px rgba(0,0,0,0.16);
+      backdrop-filter: blur(18px);
+    }
+
+    html.mobile-reader .reader-style-toolbar span {
+      display: none;
+    }
+
+    html.mobile-reader .reader-style-toolbar button,
+    html.mobile-reader .reader-style-toolbar select {
+      height: 38px;
+      border-radius: 12px;
+      font-size: 14px;
+    }
+
+    html.mobile-reader .reader-style-toolbar .theme-toggle {
+      margin-left: 0;
+      min-width: 72px;
+    }
+
+    html.mobile-reader .reader-content {
+      font-size: 18px;
+      line-height: 2.05;
+      letter-spacing: 0;
+      word-break: break-word;
+    }
+
+    html.mobile-reader .reader-chapter-title {
+      margin: 18px 0 26px;
+      font-size: 1.42em;
+      font-weight: 700;
+      line-height: 1.5;
+    }
+
+    html.mobile-reader .reader-rich-body p,
+    html.mobile-reader .reader-rich-body blockquote,
+    html.mobile-reader .reader-rich-body ul,
+    html.mobile-reader .reader-rich-body ol,
+    html.mobile-reader .reader-rich-body pre,
+    html.mobile-reader .reader-rich-body table,
+    html.mobile-reader .reader-rich-body figure {
+      margin-bottom: 1.25em;
+    }
+
+    html.mobile-reader .ai-panel {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 90;
+      height: min(74vh, 680px);
+      max-height: none;
+      border: 1px solid var(--floating-border);
+      border-bottom: 0;
+      border-radius: 24px 24px 0 0;
+      background: var(--bg-secondary);
+      box-shadow: 0 -18px 52px rgba(0,0,0,0.22);
+      transform: translateY(calc(100% - 62px));
+      transition: transform 0.24s ease;
+    }
+
+    html.mobile-reader .ai-panel:focus-within,
+    html.mobile-reader .ai-panel.mobile-open {
+      transform: translateY(0);
+    }
+
+    html.mobile-reader .ai-panel-header {
+      min-height: 62px;
+      padding: 18px 18px 10px;
+      cursor: pointer;
+    }
+
+    html.mobile-reader .ai-panel-header::before {
+      content: '';
+      display: block;
+      width: 42px;
+      height: 4px;
+      margin: -8px auto 12px;
+      border-radius: 99px;
+      background: var(--border);
+    }
+
+    html.mobile-reader .ai-title {
+      font-family: inherit;
+      font-size: 20px;
+      font-weight: 800;
+    }
+
+    html.mobile-reader .ai-messages {
+      max-height: calc(74vh - 210px);
+    }
+
+    html.mobile-reader .annotation-toolbar {
+      max-width: calc(100vw - 24px);
+      overflow-x: auto;
+      border-radius: 18px;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    html.mobile-reader .annotation-action {
+      min-width: 64px;
+      padding: 11px 14px;
+      font-size: 14px;
+      white-space: nowrap;
+    }
   </style>
 </head>
 <body>
@@ -2154,6 +2360,10 @@ let readingDialogAction = null;
 let orphanedAnnotationIds = new Set();
 let readingProgressSaveTimer = null;
 let suppressReadingProgressTracking = false;
+const readerUrlParams = new URLSearchParams(window.location.search);
+const isMobileReader = readerUrlParams.get('mobile') === '1';
+const isFlutterWebView = readerUrlParams.get('app') === 'flutter';
+const initialMobileBookId = Number(readerUrlParams.get('bookId') || 0);
 const guestUserId = 'guest_' + Date.now();
 const defaultReaderStyle = { fontSize: 16, lineHeight: '2', font: 'serif' };
 let readerStyle = { ...defaultReaderStyle };
@@ -2960,6 +3170,24 @@ async function openBook(bookId) {
     }, 300);
   }
 }
+
+window.openMobileBook = async function(bookId, auth) {
+  document.documentElement.classList.add('mobile-reader');
+  if (auth && auth.token) {
+    currentUser = {
+      id: auth.id != null ? auth.id : null,
+      username: auth.username || 'user',
+      token: auth.token
+    };
+    localStorage.setItem('readerCurrentUser', JSON.stringify(currentUser));
+    updateUserStatus();
+  } else {
+    restoreUser();
+  }
+  if (!bookId) return;
+  await openBook(Number(bookId));
+  window.scrollTo({ top: 0, behavior: 'auto' });
+};
 
 function renderChapterOptions(select, chapters) {
   select.innerHTML = '';
@@ -4022,6 +4250,11 @@ document.addEventListener('mousedown', function(e) {
   }
 });
 document.getElementById('aiSelectionClear').addEventListener('click', clearSelectedReadingContext);
+document.querySelector('.ai-panel-header').addEventListener('click', function() {
+  if (isMobileReader) {
+    document.querySelector('.ai-panel').classList.toggle('mobile-open');
+  }
+});
 window.addEventListener('scroll', scheduleReadingProgressSave, { passive: true });
 document.addEventListener('visibilitychange', function() {
   if (document.visibilityState === 'hidden') {
@@ -4033,7 +4266,11 @@ restoreUser();
 restoreReaderStyle();
 updateReaderThemeToggle();
 updateUserStatus();
-loadBookshelf();
+if (!isMobileReader) {
+  loadBookshelf();
+} else if (!isFlutterWebView && initialMobileBookId && hasAuthUser()) {
+  window.openMobileBook(initialMobileBookId, currentUser);
+}
 updateAiPanelState();
 renderAiMessages();
 </script>

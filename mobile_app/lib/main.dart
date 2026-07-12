@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 const apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
@@ -232,10 +233,10 @@ class _HomeShellState extends State<HomeShell> {
     return Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => ReaderScreen(
+        builder: (_) => WebReaderScreen(
           api: widget.api,
           bookId: book.id,
-          initialBook: book,
+          bookTitle: book.title,
           onLogin: widget.onLogin,
         ),
       ),
@@ -596,6 +597,150 @@ class ProfileScreen extends StatelessWidget {
   }
 }
 
+class WebReaderScreen extends StatefulWidget {
+  const WebReaderScreen({
+    super.key,
+    required this.api,
+    required this.bookId,
+    required this.bookTitle,
+    required this.onLogin,
+  });
+
+  final ApiClient api;
+  final int bookId;
+  final String bookTitle;
+  final Future<AuthSession?> Function() onLogin;
+
+  @override
+  State<WebReaderScreen> createState() => _WebReaderScreenState();
+}
+
+class _WebReaderScreenState extends State<WebReaderScreen> {
+  late final WebViewController controller;
+  bool loading = true;
+  String? error;
+
+  @override
+  void initState() {
+    super.initState();
+    controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageStarted: (_) => setState(() {
+            loading = true;
+            error = null;
+          }),
+          onPageFinished: (_) async {
+            await _injectAuthAndOpenBook();
+            if (mounted) setState(() => loading = false);
+          },
+          onWebResourceError: (err) {
+            if (!mounted || err.isForMainFrame == false) return;
+            setState(() {
+              loading = false;
+              error = err.description;
+            });
+          },
+        ),
+      );
+    _loadReader();
+  }
+
+  Future<void> _loadReader() async {
+    final uri = Uri.parse(apiBaseUrl).replace(
+      path: '${Uri.parse(apiBaseUrl).path.replaceFirst(RegExp(r'/$'), '')}/reader.html',
+      queryParameters: {
+        'mobile': '1',
+        'bookId': widget.bookId.toString(),
+        'app': 'flutter',
+      },
+    );
+    await controller.loadRequest(uri);
+  }
+
+  Future<void> _injectAuthAndOpenBook() async {
+    var session = widget.api.session;
+    if (session == null) {
+      session = await widget.onLogin();
+      if (session == null) {
+        if (mounted) {
+          setState(() {
+            loading = false;
+            error = '请先登录后阅读';
+          });
+        }
+        return;
+      }
+    }
+    final authJson = jsonEncode({
+      'id': session.id,
+      'username': session.username,
+      'token': session.token,
+    });
+    final script = '''
+      (function() {
+        var auth = $authJson;
+        localStorage.setItem('readerCurrentUser', JSON.stringify(auth));
+        if (typeof window.openMobileBook === 'function') {
+          window.openMobileBook(${widget.bookId}, auth);
+        } else {
+          if (typeof restoreUser === 'function') restoreUser();
+          if (typeof updateUserStatus === 'function') updateUserStatus();
+          if (typeof openBook === 'function') openBook(${widget.bookId});
+        }
+      })();
+    ''';
+    try {
+      await controller.runJavaScript(script);
+    } catch (e) {
+      if (mounted) setState(() => error = e.toString());
+    }
+  }
+
+  Future<bool> _handleBack() async {
+    if (await controller.canGoBack()) {
+      await controller.goBack();
+      return false;
+    }
+    return true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        if (await _handleBack() && context.mounted) {
+          Navigator.pop(context);
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(widget.bookTitle, maxLines: 1, overflow: TextOverflow.ellipsis),
+          actions: [
+            IconButton(
+              tooltip: '刷新',
+              onPressed: () => controller.reload(),
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+        body: Stack(
+          children: [
+            if (error == null)
+              WebViewWidget(controller: controller)
+            else
+              ErrorBlock(message: error!, onRetry: _loadReader),
+            if (loading) const LinearProgressIndicator(minHeight: 2),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class ReaderScreen extends StatefulWidget {
   const ReaderScreen({
     super.key,
@@ -619,18 +764,22 @@ class ReaderChapterBlock {
     required this.chapterIndex,
     required this.title,
     required this.text,
+    required this.imageUrls,
   });
 
   final int chapterIndex;
   final String title;
   final String text;
+  final List<String> imageUrls;
 
   factory ReaderChapterBlock.fromContent(ChapterContent content) {
-    final normalized = normalizeReaderText(content.contentHtml.isNotEmpty ? content.contentHtml : content.content);
+    final html = content.contentHtml;
+    final normalized = normalizeReaderText(html.isNotEmpty ? html : content.content);
     return ReaderChapterBlock(
       chapterIndex: content.chapterIndex,
       title: content.title,
       text: stripLeadingTitle(normalized, content.title),
+      imageUrls: extractImageUrls(html),
     );
   }
 
@@ -687,6 +836,7 @@ class ProgressAnchor {
 
 class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver {
   final scrollController = ScrollController();
+  final Map<int, GlobalKey> bodyKeys = {};
   BookSummary? book;
   List<ChapterSummary> chapters = [];
   List<ReaderChapterBlock> loadedChapterBlocks = [];
@@ -699,14 +849,18 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   bool loading = true;
   bool controlsVisible = false;
   String? error;
+  bool jumpingChapter = false;
   String selectedText = '';
   SelectedAnchor? selectedAnchor;
   String readerText = '';
   bool loadingNextChapter = false;
-  bool loadingPreviousChapter = false;
   DateTime? lastAnnotationsRefreshAt;
   final ValueNotifier<List<AiMessage>> messages = ValueNotifier<List<AiMessage>>([]);
   Timer? progressTimer;
+
+  GlobalKey _bodyKeyFor(int chapterIndex) {
+    return bodyKeys.putIfAbsent(chapterIndex, GlobalKey.new);
+  }
 
   @override
   void initState() {
@@ -798,7 +952,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     }
   }
 
-  Future<void> _loadChapter(int index, {int restoreOffset = 0, ReadingProgress? restoreProgress}) async {
+  Future<void> _loadChapter(
+    int index, {
+    int restoreOffset = 0,
+    ReadingProgress? restoreProgress,
+    bool preloadNext = true,
+  }) async {
     final loaded = await widget.api.chapter(widget.bookId, index);
     final block = ReaderChapterBlock.fromContent(loaded);
     if (!mounted) return;
@@ -812,14 +971,27 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     });
     await _loadAnnotationsForChapter(index);
     messages.value = [];
-    await Future<void>.delayed(const Duration(milliseconds: 60));
+    await WidgetsBinding.instance.endOfFrame;
     if (scrollController.hasClients) {
       final maxOffset = scrollController.position.maxScrollExtent;
-      final anchorOffset = restoreProgress == null ? null : _resolveProgressAnchor(block.text, restoreProgress);
-      final targetOffset = anchorOffset ?? restoreOffset;
+      final anchorOffset = restoreProgress == null ? null : _scrollOffsetForProgress(block, restoreProgress);
+      final targetOffset = anchorOffset ?? restoreOffset.toDouble();
       scrollController.jumpTo(targetOffset.clamp(0, maxOffset.toInt()).toDouble());
+      final restoredOffset = scrollController.offset;
+      final progressForDelayedRestore = restoreProgress;
+      if (progressForDelayedRestore != null) {
+        Future<void>.delayed(const Duration(milliseconds: 420), () {
+          if (!mounted || !scrollController.hasClients) return;
+          if ((scrollController.offset - restoredOffset).abs() > 24) return;
+          final delayedOffset = _scrollOffsetForProgress(block, progressForDelayedRestore);
+          if (delayedOffset == null) return;
+          scrollController.jumpTo(delayedOffset.clamp(0, scrollController.position.maxScrollExtent).toDouble());
+        });
+      }
     }
-    unawaited(_appendNextChapter());
+    if (preloadNext) {
+      unawaited(_appendNextChapter());
+    }
   }
 
   Future<void> _moveChapter(int delta) async {
@@ -832,27 +1004,71 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   }
 
   Future<void> _jumpToChapter(int index) async {
-    await _saveProgress();
-    await _loadChapter(index, restoreOffset: 0);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !scrollController.hasClients) return;
-      scrollController.jumpTo(0);
+    progressTimer?.cancel();
+    unawaited(_saveProgress());
+    setState(() {
+      jumpingChapter = true;
+      selectedText = '';
+      selectedAnchor = null;
+      loadedChapterBlocks = [];
+      readerText = '';
+      chapterIndex = index;
     });
+    try {
+      await _loadChapter(index, restoreOffset: 0, preloadNext: false);
+      await WidgetsBinding.instance.endOfFrame;
+      if (mounted && scrollController.hasClients) {
+        scrollController.jumpTo(0);
+      }
+    } finally {
+      if (mounted) setState(() => jumpingChapter = false);
+    }
   }
 
   double? _resolveProgressAnchor(String text, ReadingProgress progress) {
+    if (!scrollController.hasClients) return null;
     final anchor = progress.anchorText.trim();
-    if (anchor.isEmpty || !scrollController.hasClients) return null;
+    if (anchor.isEmpty) {
+      return progress.offset <= 0 ? null : progress.offset.toDouble();
+    }
     var textOffset = progress.anchorOffset;
     if (textOffset == null || textOffset < 0 || textOffset + anchor.length > text.length || text.substring(textOffset, textOffset + anchor.length) != anchor) {
       textOffset = resolveTextAnchor(text, anchor, progress.prefixText, progress.suffixText, progress.anchorOffset ?? progress.offset);
     }
     if (textOffset == null || text.isEmpty) return null;
     final ratio = textOffset.clamp(0, text.length).toDouble() / text.length;
-    return scrollController.position.maxScrollExtent * ratio;
+    final maxOffset = scrollController.position.maxScrollExtent;
+    return (maxOffset * ratio).clamp(0, maxOffset).toDouble();
+  }
+
+  double? _scrollOffsetForProgress(ReaderChapterBlock block, ReadingProgress progress) {
+    if (!scrollController.hasClients) return null;
+    final bodyOffset = _resolvedProgressTextOffset(block.text, progress);
+    if (bodyOffset == null) return _resolveProgressAnchor(block.text, progress);
+    final key = bodyKeys[block.chapterIndex];
+    final renderObject = key?.currentContext?.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize || block.text.isEmpty) {
+      return _resolveProgressAnchor(block.text, progress);
+    }
+    final viewportTop = MediaQuery.of(context).padding.top + 8;
+    final bodyTop = renderObject.localToGlobal(Offset.zero).dy;
+    final bodyHeight = renderObject.size.height;
+    final ratio = bodyOffset.clamp(0, block.text.length).toDouble() / block.text.length;
+    return scrollController.offset + bodyTop - viewportTop + bodyHeight * ratio;
+  }
+
+  int? _resolvedProgressTextOffset(String text, ReadingProgress progress) {
+    final anchor = progress.anchorText.trim();
+    if (anchor.isEmpty) return progress.anchorOffset;
+    var textOffset = progress.anchorOffset;
+    if (textOffset == null || textOffset < 0 || textOffset + anchor.length > text.length || text.substring(textOffset, textOffset + anchor.length) != anchor) {
+      textOffset = resolveTextAnchor(text, anchor, progress.prefixText, progress.suffixText, progress.anchorOffset ?? progress.offset);
+    }
+    return textOffset;
   }
 
   void _handleScroll() {
+    if (jumpingChapter) return;
     _scheduleProgressSave();
     _maybeLoadAdjacentChapters();
   }
@@ -860,17 +1076,26 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
   void _maybeLoadAdjacentChapters() {
     if (!scrollController.hasClients || chapters.isEmpty || loadedChapterBlocks.isEmpty) return;
     final position = scrollController.position;
-    if (position.extentAfter < 520 && chapterIndex != loadedChapterBlocks.last.chapterIndex) {
-      setState(() => chapterIndex = loadedChapterBlocks.last.chapterIndex);
-    } else if (position.pixels < 520 && chapterIndex != loadedChapterBlocks.first.chapterIndex) {
-      setState(() => chapterIndex = loadedChapterBlocks.first.chapterIndex);
+    final visibleChapter = _visibleChapterIndex();
+    if (visibleChapter != null && visibleChapter != chapterIndex) {
+      setState(() => chapterIndex = visibleChapter);
     }
     if (position.extentAfter < 900) {
       unawaited(_appendNextChapter());
     }
-    if (position.pixels < 260) {
-      unawaited(_prependPreviousChapter());
+  }
+
+  int? _visibleChapterIndex() {
+    final viewportTop = MediaQuery.of(context).padding.top + 12;
+    for (final block in loadedChapterBlocks) {
+      final key = bodyKeys[block.chapterIndex];
+      final renderObject = key?.currentContext?.findRenderObject();
+      if (renderObject is! RenderBox || !renderObject.hasSize) continue;
+      final top = renderObject.localToGlobal(Offset.zero).dy;
+      final bottom = top + renderObject.size.height;
+      if (bottom >= viewportTop && top <= viewportTop + 160) return block.chapterIndex;
     }
+    return null;
   }
 
   Future<void> _appendNextChapter() async {
@@ -893,34 +1118,6 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       await _loadAnnotationsForChapter(nextIndex);
     } finally {
       loadingNextChapter = false;
-    }
-  }
-
-  Future<void> _prependPreviousChapter() async {
-    if (loadingPreviousChapter || chapters.isEmpty || loadedChapterBlocks.isEmpty || !scrollController.hasClients) return;
-    final firstIndex = loadedChapterBlocks.first.chapterIndex;
-    final positions = chapters.map((c) => c.chapterIndex).toList();
-    final current = positions.indexOf(firstIndex);
-    if (current <= 0) return;
-    final previousIndex = positions[current - 1];
-    loadingPreviousChapter = true;
-    final oldMaxExtent = scrollController.position.maxScrollExtent;
-    final oldOffset = scrollController.offset;
-    try {
-      final loaded = await widget.api.chapter(widget.bookId, previousIndex);
-      if (!mounted) return;
-      setState(() {
-        loadedChapterBlocks = [ReaderChapterBlock.fromContent(loaded), ...loadedChapterBlocks];
-        _rebuildReaderText();
-      });
-      await _loadAnnotationsForChapter(previousIndex);
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !scrollController.hasClients) return;
-        final insertedExtent = scrollController.position.maxScrollExtent - oldMaxExtent;
-        scrollController.jumpTo((oldOffset + insertedExtent).clamp(0, scrollController.position.maxScrollExtent).toDouble());
-      });
-    } finally {
-      loadingPreviousChapter = false;
     }
   }
 
@@ -983,7 +1180,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     return chapter?.title ?? '';
   }
 
-  List<TextSpan> _readerTextSpans(BuildContext context) {
+  List<Widget> _readerBlockWidgets(BuildContext context) {
     final textColor = Theme.of(context).brightness == Brightness.dark ? const Color(0xFFE7DFD0) : ink;
     final bodyStyle = TextStyle(
       fontSize: fontSize,
@@ -997,17 +1194,66 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       height: 1.45,
       fontWeight: FontWeight.w800,
     );
-    final spans = <TextSpan>[];
+    final widgets = <Widget>[];
     for (var i = 0; i < loadedChapterBlocks.length; i++) {
       final block = loadedChapterBlocks[i];
-      if (i > 0) spans.add(TextSpan(text: '\n\n\n', style: bodyStyle));
+      if (i > 0) widgets.add(const SizedBox(height: 42));
       if (block.title.trim().isNotEmpty) {
-        spans.add(TextSpan(text: block.title.trim(), style: titleStyle));
-        spans.add(TextSpan(text: '\n\n', style: bodyStyle));
+        widgets.add(Text(block.title.trim(), style: titleStyle));
+        widgets.add(const SizedBox(height: 20));
       }
-      spans.addAll(_annotatedBodySpans(block, bodyStyle));
+      if (block.imageUrls.isNotEmpty) {
+        for (final url in block.imageUrls) {
+          widgets.add(_chapterImage(url));
+        }
+        widgets.add(const SizedBox(height: 12));
+      }
+      widgets.add(SelectableText.rich(
+        TextSpan(children: _annotatedBodySpans(block, bodyStyle)),
+        key: _bodyKeyFor(block.chapterIndex),
+        contextMenuBuilder: _selectionMenu,
+        onTap: _toggleControls,
+        onSelectionChanged: (selection, _) {
+          if (!selection.isValid || selection.isCollapsed) {
+            if (selectedText.isNotEmpty || selectedAnchor != null) {
+              setState(() {
+                selectedText = '';
+                selectedAnchor = null;
+              });
+            }
+            return;
+          }
+          final anchor = _anchorFromBlockSelection(block, selection.start, selection.end);
+          setState(() {
+            selectedText = anchor?.selectedText ?? '';
+            selectedAnchor = anchor;
+            chapterIndex = block.chapterIndex;
+          });
+        },
+      ));
     }
-    return spans;
+    return widgets;
+  }
+
+  Widget _chapterImage(String source) {
+    final url = absoluteAssetUrl(source);
+    if (url.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 18),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: Image.network(
+          url,
+          fit: BoxFit.contain,
+          headers: const {'Accept': 'image/*,*/*'},
+          loadingBuilder: (context, child, progress) {
+            if (progress == null) return child;
+            return const SizedBox(height: 160, child: Center(child: CircularProgressIndicator()));
+          },
+          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+        ),
+      ),
+    );
   }
 
   List<TextSpan> _annotatedBodySpans(ReaderChapterBlock block, TextStyle bodyStyle) {
@@ -1079,8 +1325,12 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
       }
       from = index + selected.length.clamp(1, selected.length).toInt();
     }
-    if (bestIndex < 0) return null;
-    return ResolvedAnnotation(annotation: annotation, startOffset: bestIndex, endOffset: bestIndex + selected.length);
+    if (bestIndex >= 0) {
+      return ResolvedAnnotation(annotation: annotation, startOffset: bestIndex, endOffset: bestIndex + selected.length);
+    }
+    final looseRange = resolveLooseTextRange(text, selected, start);
+    if (looseRange == null) return null;
+    return ResolvedAnnotation(annotation: annotation, startOffset: looseRange.$1, endOffset: looseRange.$2);
   }
 
   TextStyle _annotationTextStyle(ReadingAnnotation annotation) {
@@ -1209,39 +1459,25 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
     return null;
   }
 
-  SelectedAnchor? _anchorFromReaderSelection(int selectionStart, int selectionEnd) {
-    var cursor = 0;
-    for (var i = 0; i < loadedChapterBlocks.length; i++) {
-      final block = loadedChapterBlocks[i];
-      if (i > 0) cursor += 3;
-      final titlePrefixLength = block.title.trim().isEmpty ? 0 : block.title.trim().length + 2;
-      final blockStart = cursor;
-      final bodyStart = blockStart + titlePrefixLength;
-      final bodyEnd = bodyStart + block.text.length;
-      final blockEnd = blockStart + block.displayText.length;
-      if (selectionStart >= bodyStart && selectionEnd <= bodyEnd) {
-        final start = selectionStart - bodyStart;
-        final end = selectionEnd - bodyStart;
-        final selected = block.text.substring(start, end).trim();
-        if (selected.isEmpty) return null;
-        final leadingWhitespace = block.text.substring(start, end).length - block.text.substring(start, end).trimLeft().length;
-        final normalizedStart = start + leadingWhitespace;
-        return SelectedAnchor(
-          chapterIndex: block.chapterIndex,
-          selectedText: selected,
-          startOffset: normalizedStart,
-          endOffset: normalizedStart + selected.length,
-          prefixText: block.text.substring((normalizedStart - 120).clamp(0, block.text.length).toInt(), normalizedStart),
-          suffixText: block.text.substring(
-            (normalizedStart + selected.length).clamp(0, block.text.length).toInt(),
-            (normalizedStart + selected.length + 120).clamp(0, block.text.length).toInt(),
-          ),
-        );
-      }
-      if (selectionStart >= blockStart && selectionStart < blockEnd) return null;
-      cursor = blockEnd;
-    }
-    return null;
+  SelectedAnchor? _anchorFromBlockSelection(ReaderChapterBlock block, int selectionStart, int selectionEnd) {
+    final start = selectionStart.clamp(0, block.text.length).toInt();
+    final end = selectionEnd.clamp(start, block.text.length).toInt();
+    final raw = block.text.substring(start, end);
+    final selected = raw.trim();
+    if (selected.isEmpty) return null;
+    final leadingWhitespace = raw.length - raw.trimLeft().length;
+    final normalizedStart = start + leadingWhitespace;
+    return SelectedAnchor(
+      chapterIndex: block.chapterIndex,
+      selectedText: selected,
+      startOffset: normalizedStart,
+      endOffset: normalizedStart + selected.length,
+      prefixText: block.text.substring((normalizedStart - 120).clamp(0, block.text.length).toInt(), normalizedStart),
+      suffixText: block.text.substring(
+        (normalizedStart + selected.length).clamp(0, block.text.length).toInt(),
+        (normalizedStart + selected.length + 120).clamp(0, block.text.length).toInt(),
+      ),
+    );
   }
 
   Future<void> _createAnnotation({String color = 'yellow', String markStyle = 'underline', String? noteContent}) async {
@@ -1383,36 +1619,46 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
 
   ProgressAnchor? _currentProgressAnchor() {
     if (!scrollController.hasClients || loadedChapterBlocks.isEmpty) return null;
-    final maxExtent = scrollController.position.maxScrollExtent;
-    final ratio = maxExtent <= 0 ? 0.0 : (scrollController.offset / maxExtent).clamp(0.0, 1.0);
-    final totalLength = loadedChapterBlocks.fold<int>(0, (sum, block) => sum + block.displayText.length + 3);
-    var estimatedGlobalOffset = (totalLength * ratio).round();
+    final viewportTop = MediaQuery.of(context).padding.top + 8;
     for (final block in loadedChapterBlocks) {
-      final titlePrefixLength = block.title.trim().isEmpty ? 0 : block.title.trim().length + 2;
-      final blockLength = block.displayText.length + 3;
-      if (estimatedGlobalOffset <= blockLength) {
-        final bodyOffset = (estimatedGlobalOffset - titlePrefixLength).clamp(0, block.text.length).toInt();
-        final anchorLength = (block.text.length - bodyOffset).clamp(0, 90).toInt();
-        final anchorText = anchorLength <= 0 ? '' : block.text.substring(bodyOffset, bodyOffset + anchorLength).trim();
-        return ProgressAnchor(
-          chapterIndex: block.chapterIndex,
-          offset: scrollController.offset.round(),
-          anchorText: anchorText,
-          prefixText: block.text.substring((bodyOffset - 120).clamp(0, block.text.length).toInt(), bodyOffset),
-          suffixText: block.text.substring((bodyOffset + anchorLength).clamp(0, block.text.length).toInt(), (bodyOffset + anchorLength + 120).clamp(0, block.text.length).toInt()),
-          anchorOffset: bodyOffset,
-        );
-      }
-      estimatedGlobalOffset -= blockLength;
+      final key = bodyKeys[block.chapterIndex];
+      final renderObject = key?.currentContext?.findRenderObject();
+      if (renderObject is! RenderBox || !renderObject.hasSize) continue;
+      final top = renderObject.localToGlobal(Offset.zero).dy;
+      final height = renderObject.size.height;
+      final bottom = top + height;
+      if (bottom < viewportTop || top > viewportTop + 120) continue;
+      final ratio = height <= 0 ? 0.0 : ((viewportTop - top) / height).clamp(0.0, 1.0);
+      final bodyOffset = (block.text.length * ratio).round().clamp(0, block.text.length).toInt();
+      return _progressAnchorForBlock(block, bodyOffset);
     }
-    final block = loadedChapterBlocks.last;
+    final block = loadedChapterBlocks.firstWhere(
+      (candidate) {
+        final key = bodyKeys[candidate.chapterIndex];
+        final renderObject = key?.currentContext?.findRenderObject();
+        if (renderObject is! RenderBox || !renderObject.hasSize) return false;
+        return renderObject.localToGlobal(Offset.zero).dy > viewportTop;
+      },
+      orElse: () => loadedChapterBlocks.last,
+    );
+    return _progressAnchorForBlock(block, 0);
+  }
+
+  ProgressAnchor _progressAnchorForBlock(ReaderChapterBlock block, int bodyOffset) {
+    final offset = scrollController.hasClients ? scrollController.offset.round() : 0;
+    final normalizedOffset = bodyOffset.clamp(0, block.text.length).toInt();
+    final anchorLength = (block.text.length - normalizedOffset).clamp(0, 90).toInt();
+    final anchorText = anchorLength <= 0 ? '' : block.text.substring(normalizedOffset, normalizedOffset + anchorLength).trim();
     return ProgressAnchor(
       chapterIndex: block.chapterIndex,
-      offset: scrollController.offset.round(),
-      anchorText: block.text.substring(0, block.text.length.clamp(0, 90).toInt()).trim(),
-      prefixText: '',
-      suffixText: block.text.substring(0, block.text.length.clamp(0, 120).toInt()),
-      anchorOffset: 0,
+      offset: offset,
+      anchorText: anchorText,
+      prefixText: block.text.substring((normalizedOffset - 120).clamp(0, block.text.length).toInt(), normalizedOffset),
+      suffixText: block.text.substring(
+        (normalizedOffset + anchorLength).clamp(0, block.text.length).toInt(),
+        (normalizedOffset + anchorLength + 120).clamp(0, block.text.length).toInt(),
+      ),
+      anchorOffset: normalizedOffset,
     );
   }
 
@@ -1489,31 +1735,7 @@ class _ReaderScreenState extends State<ReaderScreen> with WidgetsBindingObserver
                       child: ListView(
                         controller: scrollController,
                         padding: const EdgeInsets.fromLTRB(24, 28, 24, 132),
-                        children: [
-                          SelectableText.rich(
-                            TextSpan(children: _readerTextSpans(context)),
-                            contextMenuBuilder: _selectionMenu,
-                            onTap: _toggleControls,
-                            onSelectionChanged: (selection, _) {
-                              if (!selection.isValid || selection.isCollapsed) {
-                                if (selectedText.isNotEmpty || selectedAnchor != null) {
-                                  setState(() {
-                                    selectedText = '';
-                                    selectedAnchor = null;
-                                  });
-                                }
-                                return;
-                              }
-                              final start = selection.start.clamp(0, readerText.length).toInt();
-                              final end = selection.end.clamp(0, readerText.length).toInt();
-                              final value = readerText.substring(start, end).trim();
-                              setState(() {
-                                selectedText = value;
-                                selectedAnchor = _anchorFromReaderSelection(start, end) ?? _findSelectedAnchor(value);
-                              });
-                            },
-                          ),
-                        ],
+                        children: _readerBlockWidgets(context),
                       ),
                     ),
                     if (controlsVisible)
@@ -2811,6 +3033,19 @@ String normalizeReaderText(String source) {
   return text.trim();
 }
 
+List<String> extractImageUrls(String html) {
+  if (html.trim().isEmpty) return const [];
+  final urls = <String>[];
+  final seen = <String>{};
+  final pattern = RegExp(r'''<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>''', caseSensitive: false);
+  for (final match in pattern.allMatches(html)) {
+    final url = decodeHtmlEntities(match.group(1) ?? '').trim();
+    if (url.isEmpty || !seen.add(url)) continue;
+    urls.add(url);
+  }
+  return urls;
+}
+
 String stripLeadingTitle(String text, String title) {
   final normalizedTitle = title.trim();
   if (normalizedTitle.isEmpty) return text;
@@ -2889,7 +3124,40 @@ int? resolveTextAnchor(String text, String anchorText, String prefixText, String
     }
     from = index + anchor.length.clamp(1, anchor.length).toInt();
   }
-  return bestIndex < 0 ? null : bestIndex;
+  if (bestIndex >= 0) return bestIndex;
+  return resolveLooseTextRange(text, anchor, preferredOffset)?.$1;
+}
+
+(int, int)? resolveLooseTextRange(String text, String selected, int preferredOffset) {
+  final target = selected.replaceAll(RegExp(r'\s+'), '');
+  if (target.isEmpty) return null;
+  final compact = StringBuffer();
+  final indexMap = <int>[];
+  for (var i = 0; i < text.length; i++) {
+    final char = text[i];
+    if (RegExp(r'\s').hasMatch(char)) continue;
+    indexMap.add(i);
+    compact.write(char);
+  }
+  final compactText = compact.toString();
+  var bestIndex = -1;
+  var bestDistance = 1 << 30;
+  var from = 0;
+  while (from <= compactText.length) {
+    final index = compactText.indexOf(target, from);
+    if (index < 0) break;
+    final originalIndex = indexMap[index];
+    final distance = (originalIndex - preferredOffset).abs();
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+    from = index + target.length.clamp(1, target.length).toInt();
+  }
+  if (bestIndex < 0) return null;
+  final start = indexMap[bestIndex];
+  final end = indexMap[(bestIndex + target.length - 1).clamp(0, indexMap.length - 1).toInt()] + 1;
+  return (start, end);
 }
 
 String stripRepeatedAiTitle(String answer, String question) {
