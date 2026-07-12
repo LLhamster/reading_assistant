@@ -66,9 +66,15 @@ public class ReadingController {
         Long userId = getUserId(request);
         if(index == null || offset ==null) throw new IllegalArgumentException("记录进度时没有章节号");
         log.info("更新阅读进度 - userId:{}, bookId:{}, chapterIndex:{}, offset:{}", userId, bookId, index, offset);
-        Reading reading = readingService.updateProgress(bookId, userId, index, offset, anchorText, prefixText, suffixText, anchorOffset);
+        Reading reading = hasProgressAnchor(anchorText, prefixText, suffixText, anchorOffset)
+                ? readingService.updateProgress(bookId, userId, index, offset, anchorText, prefixText, suffixText, anchorOffset)
+                : readingService.updateProgress(bookId, userId, index, offset);
         log.info("更新阅读进度完成 - userId:{}, bookId:{}", userId, bookId);
         return CommonResponse.success(reading);
+    }
+
+    private boolean hasProgressAnchor(String anchorText, String prefixText, String suffixText, Integer anchorOffset) {
+        return anchorOffset != null || anchorText != null || prefixText != null || suffixText != null;
     }
 
     private Integer intValue(Object value) {

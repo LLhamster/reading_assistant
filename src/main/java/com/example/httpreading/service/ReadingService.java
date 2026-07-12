@@ -83,6 +83,11 @@ public class ReadingService {
     }
 
     @Transactional
+    public Reading updateProgress(Long bookId, Long userId, Integer index, Integer offset){
+        return updateProgress(bookId, userId, index, offset, null, null, null, null);
+    }
+
+    @Transactional
     public Reading updateProgress(Long bookId, Long userId, Integer index, Integer offset,
                                   String anchorText, String prefixText, String suffixText, Integer anchorOffset){
         Reading reading = readingRepository.findByBookIdAndUserId(bookId, userId).orElseGet(Reading::new);

@@ -19,6 +19,7 @@ public class Reading {
     @Column(name = "chapter_index")
     private Integer chapterIndex;
 
+    @Column(name = "`offset`")
     private Integer offset;
 
     @Column(name = "anchor_text", length = 500)
